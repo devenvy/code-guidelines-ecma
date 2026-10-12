@@ -7,11 +7,19 @@ name: Release
 # release-please runs as the devenvy-bot app (org variable DEVENVY_BOT_CLIENT_ID, org secret
 # DEVENVY_BOT_PRIVATE_KEY) so its pull requests get CI; GITHUB_TOKEN ones would not.
 #
+# If publishing a release fails, run this workflow by hand from main with that release's tag: it
+# runs CI (on main) and publishes the tag's commit again (a version already on npm is skipped).
+#
 # The npm trusted publisher is bound to this file name (release.yml).
 on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to publish again (e.g. v2.0.0); empty for a normal run
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -26,9 +34,9 @@ jobs:
     timeout-minutes: 10
     permissions: {}
     outputs:
-      created: ${{ steps.release.outputs.release_created }}
-      tag: ${{ steps.release.outputs.tag_name }}
-      version: ${{ steps.release.outputs.version }}
+      created: ${{ steps.target.outputs.created }}
+      tag: ${{ steps.target.outputs.tag }}
+      version: ${{ steps.target.outputs.version }}
     steps:
       - id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -57,6 +65,24 @@ jobs:
             pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --label 'autorelease: pending' --json number --jq '.[0].number // empty')
           fi
           if [ -n "$pr" ]; then gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --auto --squash; fi
+      - name: Release to publish (the one just created, or an existing tag given by hand)
+        id: target
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          CREATED: ${{ steps.release.outputs.release_created }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          VERSION: ${{ steps.release.outputs.version }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -n "$INPUT_TAG" ]; then
+            if [[ ! "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::\"$INPUT_TAG\" is not a release tag like v2.0.0"
+              exit 1
+            fi
+            gh release view "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null
+            CREATED=true TAG="$INPUT_TAG" VERSION="${INPUT_TAG#v}"
+          fi
+          { echo "created=$CREATED"; echo "tag=$TAG"; echo "version=$VERSION"; } >> "$GITHUB_OUTPUT"
 
   ci:
     needs: release-please
@@ -99,7 +125,8 @@ jobs:
           mkdir release-assets
           pnpm pack --pack-destination release-assets
           pnpm sbom --sbom-format spdx --prod --out release-assets/code-guidelines.spdx.json
-          echo "tarball=$(ls release-assets/*.tgz)" >> "$GITHUB_OUTPUT"
+          # ./ prefix: npm publish reads "dir/file.tgz" as a GitHub owner/repo shorthand
+          echo "tarball=$(ls ./release-assets/*.tgz)" >> "$GITHUB_OUTPUT"
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: ${{ steps.pack.outputs.tarball }}
