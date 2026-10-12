@@ -1,0 +1,433 @@
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { run } from '../src/cli/index.mjs';
+import { BLOCK_START } from '../src/cli/lib/blocks.mjs';
+
+/** @type {string[]} */
+const dirs = [];
+
+/** Workflow files that satisfy the CI convention check. */
+const WORKFLOWS = path.join(import.meta.dirname, 'fixtures/workflows');
+
+/** Creates a temp project with the convention's workflow files and the given files. */
+function project(files = {}) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'cg-cli-'));
+  dirs.push(dir);
+  cpSync(WORKFLOWS, dir, { recursive: true });
+  const all = {
+    'package.json': '{\n  "name": "demo",\n  "scripts": {\n    "build": "x"\n  }\n}\n',
+    ...files,
+  };
+  for (const [name, content] of Object.entries(all)) {
+    mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    writeFileSync(path.join(dir, name), content);
+  }
+  return dir;
+}
+
+const read = (dir, name) => readFileSync(path.join(dir, name), 'utf8');
+const json = (dir, name) => JSON.parse(read(dir, name));
+const cli = (dir, ...args) => run(args, dir);
+
+afterEach(() => {
+  for (const dir of dirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe('init', () => {
+  it('sets up a node project and check passes', async () => {
+    const dir = project();
+    const result = await cli(dir, 'init', '--env', 'node', '--vitest');
+    expect(result.code).toBe(0);
+    expect(read(dir, 'eslint.config.mjs')).toContain("env: 'node'");
+    expect(read(dir, 'eslint.config.mjs')).toContain('vitest: true');
+    // no "include": the whole project type-checks, except root tool configs
+    expect(json(dir, 'tsconfig.json')).toEqual({
+      extends: '@devenvy/code-guidelines/tsconfig/node.json',
+      compilerOptions: {},
+      exclude: ['node_modules', 'dist', 'coverage', '*.config.*'],
+    });
+    expect(result.output.join('\n')).toContain('@types/node');
+    const pkg = json(dir, 'package.json');
+    expect(pkg.prettier).toBe('@devenvy/code-guidelines/prettier');
+    expect(pkg.codeGuidelines).toEqual({
+      env: 'node',
+      typescript: true,
+      angular: false,
+      vitest: true,
+    });
+    expect(pkg.scripts).toMatchObject({
+      build: 'x',
+      lint: 'eslint . --max-warnings 0',
+      typecheck: 'tsc --noEmit',
+      'test:ci': 'vitest run --coverage',
+    });
+    expect(read(dir, '.nvmrc')).toBe('24\n');
+    expect(
+      read(dir, '.editorconfig').startsWith('root = true\n\n# >>> @devenvy/code-guidelines >>>\n'),
+    ).toBe(true);
+    expect(json(dir, '.vscode/extensions.json').recommendations).toContain('vitest.explorer');
+    expect(await cli(dir, 'check')).toEqual({
+      code: 0,
+      output: ['code-guidelines: everything matches.'],
+    });
+  });
+
+  it('sets up an angular project with the angular prettier config', async () => {
+    const dir = project({ 'tsconfig.spec.json': '{}' });
+    expect((await cli(dir, 'init', '--angular', '--prefix', 'sw')).code).toBe(0);
+    expect(read(dir, 'eslint.config.mjs')).toContain("angular: { prefix: 'sw' }");
+    expect(read(dir, 'eslint.config.mjs')).toContain("env: 'browser'");
+    const pkg = json(dir, 'package.json');
+    expect(pkg.prettier).toBe('@devenvy/code-guidelines/prettier/angular');
+    expect(pkg.scripts.typecheck).toBe(
+      'ngc -p tsconfig.app.json --noEmit && tsc -p tsconfig.spec.json --noEmit',
+    );
+    expect(pkg.scripts['test:ci']).toBeUndefined(); // no --vitest
+    expect(json(dir, '.vscode/extensions.json').recommendations).toContain('angular.ng-template');
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+
+  it('adds the Angular test:ci script with --vitest', async () => {
+    const dir = project();
+    await cli(dir, 'init', '--angular', '--prefix', 'app', '--vitest');
+    expect(json(dir, 'package.json').scripts['test:ci']).toBe('ng test --watch=false --coverage');
+  });
+
+  it('rejects a prefix that is not kebab-case', async () => {
+    const result = await cli(project(), 'init', '--angular', '--prefix', "a'b");
+    expect(result.code).toBe(1);
+    expect(result.output[0]).toContain('--prefix must be lowercase kebab-case');
+  });
+
+  it('sets up a plain JavaScript project', async () => {
+    const dir = project();
+    expect((await cli(dir, 'init', '--env', 'browser', '--no-typescript')).code).toBe(0);
+    expect(read(dir, 'eslint.config.mjs')).toContain('typescript: false');
+    expect(json(dir, 'tsconfig.json')).toEqual({
+      extends: '@devenvy/code-guidelines/tsconfig/js.json',
+      compilerOptions: {},
+      exclude: ['node_modules', 'dist', 'coverage', '*.config.*'],
+    });
+    expect(json(dir, '.vscode/settings.json')['typescript.tsdk']).toBeUndefined();
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+
+  it('prints usage for unknown flags and commands', async () => {
+    expect(await cli(project(), 'init', '--nope')).toMatchObject({ code: 2 });
+    expect((await cli(project(), 'frobnicate')).output[0]).toContain('Usage: code-guidelines');
+  });
+
+  it('requires --env without --angular and --prefix with --angular', async () => {
+    expect((await cli(project(), 'init')).output[0]).toMatch(/--env node\|browser is required/);
+    expect((await cli(project(), 'init', '--angular')).output[0]).toMatch(
+      /--angular requires --prefix/,
+    );
+  });
+
+  it('stops on an existing eslint.config.js without writing anything', async () => {
+    const dir = project({ 'eslint.config.js': 'module.exports = [];\n', '.prettierrc': '{}' });
+    const result = await cli(dir, 'init', '--env', 'node');
+    expect(result.code).toBe(1);
+    expect(result.output.join('\n')).toContain('eslint.config.js: existing ESLint config');
+    expect(result.output.join('\n')).toContain('.prettierrc');
+    expect(existsSync(path.join(dir, 'eslint.config.mjs'))).toBe(false);
+    expect(existsSync(path.join(dir, '.editorconfig'))).toBe(false);
+  });
+
+  it('replaces conflicting config with --force', async () => {
+    const dir = project({ 'eslint.config.js': 'module.exports = [];\n', '.prettierrc': '{}' });
+    expect((await cli(dir, 'init', '--env', 'node', '--force')).code).toBe(0);
+    expect(existsSync(path.join(dir, 'eslint.config.js'))).toBe(false);
+    expect(existsSync(path.join(dir, '.prettierrc'))).toBe(false);
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+
+  it('is idempotent', async () => {
+    const dir = project();
+    await cli(dir, 'init', '--env', 'node');
+    const before =
+      read(dir, 'package.json') + read(dir, '.editorconfig') + read(dir, 'tsconfig.json');
+    expect((await cli(dir, 'init', '--env', 'node')).code).toBe(0);
+    expect(
+      read(dir, 'package.json') + read(dir, '.editorconfig') + read(dir, 'tsconfig.json'),
+    ).toBe(before);
+  });
+
+  it('preserves a CRLF package.json', async () => {
+    const dir = project({ 'package.json': '{\r\n  "name": "demo"\r\n}\r\n' });
+    await cli(dir, 'init', '--env', 'node');
+    const text = read(dir, 'package.json');
+    expect(text).toContain('\r\n');
+    expect(text.replaceAll('\r\n', '')).not.toContain('\n');
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+
+  it('migrates an ng new tsconfig onto the angular base', async () => {
+    const ngNew = `/* To learn more about Typescript configuration file: https://www.typescriptlang.org/docs/handbook/tsconfig-json.html. */
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "experimentalDecorators": true,
+    "importHelpers": true,
+    "target": "ES2022",
+    "module": "preserve",
+    "outDir": "./dist/out-tsc"
+  },
+  "angularCompilerOptions": {
+    "enableI18nLegacyMessageIdFormat": false,
+    "strictInjectionParameters": true,
+    "strictInputAccessModifiers": true
+  },
+  "files": []
+}
+`;
+    const dir = project({ 'tsconfig.json': ngNew });
+    const result = await cli(dir, 'init', '--angular', '--prefix', 'app');
+    expect(result.code).toBe(0);
+    const text = read(dir, 'tsconfig.json');
+    expect(text).toContain('To learn more about Typescript');
+    expect(text).toContain('"extends": "@devenvy/code-guidelines/tsconfig/angular.json"');
+    expect(text).toContain('"outDir": "./dist/out-tsc"');
+    expect(text).not.toContain('noImplicitOverride');
+    expect(text).not.toContain('strictInjectionParameters');
+    expect(text).not.toContain('angularCompilerOptions');
+    expect(text.indexOf('"extends"')).toBeLessThan(text.indexOf('"compilerOptions"'));
+    expect(text).toContain('"files": []');
+  });
+
+  it('keeps tsconfig options that differ from the base and reports them', async () => {
+    const dir = project({
+      'tsconfig.json': '{ "compilerOptions": { "target": "ES2020", "strict": true } }\n',
+    });
+    const result = await cli(dir, 'init', '--env', 'node');
+    expect(result.output.join('\n')).toContain('kept compilerOptions.target = "ES2020"');
+    expect(read(dir, 'tsconfig.json')).not.toContain('"strict"');
+  });
+});
+
+describe('check', () => {
+  /** A fully initialised node project. */
+  async function initialised() {
+    const dir = project();
+    await cli(dir, 'init', '--env', 'node');
+    return dir;
+  }
+
+  it('fails when a managed block was edited, and sync restores it', async () => {
+    const dir = await initialised();
+    writeFileSync(
+      path.join(dir, '.editorconfig'),
+      read(dir, '.editorconfig').replace('indent_size = 2', 'indent_size = 4'),
+    );
+    const result = await cli(dir, 'check');
+    expect(result.code).toBe(1);
+    expect(result.output.join('\n')).toContain('- indent_size = 2\n+ indent_size = 4');
+    expect((await cli(dir, 'sync', '--dry-run')).output.join('\n')).toContain(
+      'would update .editorconfig',
+    );
+    expect((await cli(dir, 'check')).code).toBe(1);
+    await cli(dir, 'sync');
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+
+  it('keeps consumer content outside the block through sync', async () => {
+    const dir = await initialised();
+    writeFileSync(
+      path.join(dir, '.editorconfig'),
+      `${read(dir, '.editorconfig')}\n[*.cs]\nindent_size = 4\n`,
+    );
+    await cli(dir, 'sync');
+    expect(read(dir, '.editorconfig')).toContain('[*.cs]\nindent_size = 4\n');
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+
+  it('fails when the ESLint config no longer uses createConfig', async () => {
+    const dir = await initialised();
+    writeFileSync(path.join(dir, 'eslint.config.mjs'), 'export default [];\n');
+    expect((await cli(dir, 'check')).output.join('\n')).toContain('does not use createConfig');
+  });
+
+  it('fails when the prettier key is removed', async () => {
+    const dir = await initialised();
+    const pkg = json(dir, 'package.json');
+    delete pkg.prettier;
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
+    expect((await cli(dir, 'check')).output.join('\n')).toContain(
+      '"prettier" should be "@devenvy/code-guidelines/prettier"',
+    );
+  });
+
+  it('fails when tsconfig no longer extends the base', async () => {
+    const dir = await initialised();
+    writeFileSync(path.join(dir, 'tsconfig.json'), '{}');
+    expect((await cli(dir, 'check')).output.join('\n')).toContain(
+      'does not extend @devenvy/code-guidelines/tsconfig/',
+    );
+  });
+
+  it('follows relative tsconfig extends', async () => {
+    const dir = await initialised();
+    writeFileSync(path.join(dir, 'tsconfig.base.json'), read(dir, 'tsconfig.json'));
+    writeFileSync(path.join(dir, 'tsconfig.json'), '{ "extends": "./tsconfig.base.json" }');
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+
+  it('fails on a stray prettier config file and a second eslint config', async () => {
+    const dir = await initialised();
+    writeFileSync(path.join(dir, '.prettierrc.json'), '{}');
+    writeFileSync(path.join(dir, 'eslint.config.js'), 'export default [];');
+    const output = (await cli(dir, 'check')).output.join('\n');
+    expect(output).toContain('.prettierrc.json: overrides package.json "prettier"');
+    expect(output).toContain('more than one ESLint config');
+  });
+
+  it('fails when the angular choice and the ESLint config disagree', async () => {
+    const dir = await initialised();
+    const pkg = json(dir, 'package.json');
+    pkg.codeGuidelines.angular = true;
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
+    expect((await cli(dir, 'check')).output.join('\n')).toContain('codeGuidelines.angular is true');
+  });
+
+  it('explains when init has not run', async () => {
+    expect((await cli(project(), 'check')).output[0]).toContain('Run: code-guidelines init');
+  });
+
+  it('refuses to sync a file with a leftover block marker', async () => {
+    const dir = await initialised();
+    const text = read(dir, '.gitattributes').replace('# <<< @devenvy/code-guidelines <<<\n', '');
+    writeFileSync(path.join(dir, '.gitattributes'), text);
+    const result = await cli(dir, 'sync');
+    expect(result.code).toBe(1);
+    expect(result.output[0]).toContain(
+      '.gitattributes has an incomplete @devenvy/code-guidelines block',
+    );
+  });
+
+  it('names a malformed JSON file instead of crashing', async () => {
+    const dir = await initialised();
+    writeFileSync(path.join(dir, '.vscode/settings.json'), '{ "a": ');
+    const result = await cli(dir, 'check');
+    expect(result.code).toBe(1);
+    expect(result.output[0]).toContain('.vscode/settings.json is not valid JSON');
+  });
+
+  it('accepts a managed block placed by init in a file the dotnet package also manages', async () => {
+    const dir = project({ '.editorconfig': 'root = true\n\n[*.cs]\nindent_size = 4\n' });
+    await cli(dir, 'init', '--env', 'node');
+    const text = read(dir, '.editorconfig');
+    expect(text.indexOf(BLOCK_START)).toBeLessThan(text.indexOf('[*.cs]'));
+    expect(text.match(/root = true/g)).toHaveLength(1);
+  });
+});
+
+describe('check: CI convention', () => {
+  const CI = '.github/workflows/ci.yml';
+
+  /** An initialised node project with Vitest. */
+  async function initialised() {
+    const dir = project();
+    await cli(dir, 'init', '--env', 'node', '--vitest');
+    return dir;
+  }
+
+  /** Problems check reports, one per line. */
+  async function problems(dir) {
+    return (await cli(dir, 'check')).output;
+  }
+
+  it('reports every missing workflow and release file', async () => {
+    const dir = await initialised();
+    rmSync(path.join(dir, '.github'), { recursive: true });
+    rmSync(path.join(dir, 'release-please-config.json'));
+    rmSync(path.join(dir, '.release-please-manifest.json'));
+    expect(await problems(dir)).toEqual(
+      expect.arrayContaining([
+        `${CI}: missing`,
+        '.github/workflows/release.yml: missing',
+        '.github/workflows/scorecard.yml: missing',
+        '.github/dependabot.yml: missing',
+        'release-please-config.json: missing',
+        '.release-please-manifest.json: missing',
+      ]),
+    );
+  });
+
+  it('reports jobs and steps that drift from the convention', async () => {
+    const dir = await initialised();
+    const ci = read(dir, CI)
+      .replace('types: [opened, synchronize, reopened, edited]', 'types: [opened]')
+      .replace('      - run: pnpm run knip\n', '')
+      .replace('      - uses: zizmorcore/zizmor-action@v0\n', '')
+      .replace('      - run: pnpm run test:ci\n', '      - run: pnpm test\n')
+      .replace('actions/dependency-review-action@v5', 'actions/checkout@v7')
+      .replace('  audit:\n    steps:\n      - run: pnpm audit --prod\n', '')
+      .replace('    if: always()\n', '')
+      .replace('  dependabot-auto-merge:', '  docker:\n    steps: []\n  dependabot-auto-merge:');
+    writeFileSync(path.join(dir, CI), ci);
+    expect(await problems(dir)).toEqual(
+      expect.arrayContaining([
+        `${CI}: pull_request types must include "edited" so a fixed PR title is checked again`,
+        `${CI}: missing job "audit"`,
+        `${CI}: job "result" must run with if: always()`,
+        `${CI}: job "result" must need every job; missing: docker`,
+        `${CI}: job "lint" must run the "knip" script`,
+        `${CI}: job "test" must run the "test:ci" script`,
+        `${CI}: job "lint" must run zizmor`,
+        `${CI}: job "dependency-review" must use actions/dependency-review-action`,
+      ]),
+    );
+  });
+
+  it('requires a pull_request trigger, release-please and valid YAML', async () => {
+    const dir = await initialised();
+    writeFileSync(path.join(dir, CI), read(dir, CI).replace(/^on:\n.*\n.*\n/m, 'on: push\n'));
+    writeFileSync(path.join(dir, '.github/workflows/release.yml'), 'jobs: {}\n');
+    writeFileSync(path.join(dir, '.github/workflows/scorecard.yml'), 'jobs: [\n');
+    const output = await problems(dir);
+    expect(output).toEqual(
+      expect.arrayContaining([
+        `${CI}: must run on pull_request`,
+        '.github/workflows/release.yml: no step uses googleapis/release-please-action',
+      ]),
+    );
+    expect(output.join('\n')).toContain('.github/workflows/scorecard.yml: invalid YAML');
+  });
+
+  it('requires the scripts CI runs', async () => {
+    const dir = await initialised();
+    const pkg = json(dir, 'package.json');
+    delete pkg.scripts.knip;
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
+    expect(await problems(dir)).toContain('package.json: missing script "knip" (CI runs it)');
+  });
+
+  it('skips the workflow checks with codeGuidelines.workflows: false', async () => {
+    const dir = await initialised();
+    rmSync(path.join(dir, '.github'), { recursive: true });
+    const pkg = json(dir, 'package.json');
+    pkg.codeGuidelines.workflows = false;
+    writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+});

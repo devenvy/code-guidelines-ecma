@@ -1,0 +1,14 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignore": ["test/fixtures/**"],
+  "ignoreDependencies": [
+    "@angular/common",
+    "@angular/compiler",
+    "@angular/compiler-cli",
+    "@angular/core",
+    "@angular/forms",
+    "@angular/platform-browser",
+    "rxjs",
+    "tslib"
+  ]
+}

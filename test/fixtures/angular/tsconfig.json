@@ -1,0 +1,7 @@
+{
+  "extends": "../../../tsconfig/angular.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["src"]
+}

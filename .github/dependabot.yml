@@ -1,0 +1,50 @@
+version: 2
+
+# One weekly pull request per ecosystem, plus one for security fixes. Version updates wait out a
+# 7-day cooldown, so a compromised release is usually caught before it reaches a PR (security
+# updates are not delayed).
+# npm majors are included on purpose: plugin and Angular majors are how new rules arrive, and the
+# rule-inventory and effective-config snapshot tests turn them into reviewable decisions.
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies]
+    cooldown:
+      default-days: 7
+    # conventional titles for release-please: runtime bumps release a patch, dev bumps do not
+    commit-message:
+      prefix: fix
+      prefix-development: chore
+      include: scope
+    groups:
+      dependencies:
+        applies-to: version-updates
+        patterns: ['*']
+      security:
+        applies-to: security-updates
+        patterns: ['*']
+    ignore:
+      # typescript-eslint (<6.1) and the Angular 22 compiler (6.0.x) pin TypeScript; the peer
+      # range moves when they do.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      # tracks the Node line in .nvmrc / engines
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    labels: [dependencies]
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ['*']

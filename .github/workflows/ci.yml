@@ -1,0 +1,217 @@
+name: CI
+
+# Same layout as consumer repos: pr-title, lint, test, build, audit, dependency-review,
+# repo-specific jobs (here: rules), Dependabot auto-merge, and result as the single required
+# status check. `code-guidelines check` verifies this layout.
+on:
+  pull_request:
+    # edited: re-check after a PR title is fixed (titles become release-please commit messages)
+    types: [opened, synchronize, reopened, edited]
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Squash merges use the PR title as the commit message, and release-please reads those, so
+  # titles must be conventional commits (feat:, fix:, feat!:, chore:, ...).
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: read
+    steps:
+      - uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run guidelines:check
+      - run: pnpm run lint
+      - run: pnpm run format:check
+      - run: pnpm run typecheck
+      - run: pnpm run knip
+      - name: actionlint
+        uses: raven-actions/actionlint@3d39aea434753780c3b3d4a1a31c854b4dbf49d7 # v2.2.0
+      - name: zizmor
+        uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          advanced-security: false # fail the job on findings instead of uploading SARIF
+
+  # Includes the pack smoke test (installs the tarball into fresh consumer projects). Windows
+  # runs too: the CLI writes files and must keep line endings and paths right there.
+  test:
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            node: 22
+          - os: ubuntu-latest
+            node: 24
+            coverage-report: true
+          - os: windows-latest
+            node: 24
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write # coverage summary comment
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:ci
+      # Dependabot and fork PRs get a read-only token and cannot comment; the coverage
+      # thresholds in the test run are the gate either way.
+      - name: Coverage report
+        if: >-
+          ${{ matrix.coverage-report && github.event_name == 'pull_request' && !cancelled()
+          && github.actor != 'dependabot[bot]'
+          && !github.event.pull_request.head.repo.fork }}
+        continue-on-error: true
+        uses: davelosert/vitest-coverage-report-action@c4bbc33a89b7ace0e63d35f1f7d4bcee31155a73 # v2.13.0
+
+  # The published artifact: prepack builds the type declarations, then publint and
+  # are-the-types-wrong check the packed tarball's exports and types.
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check:package
+
+  # New advisories in unrelated packages must not block PRs; they fail main and the weekly run.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - run: pnpm audit --prod --audit-level high
+
+  # Fails a PR that adds a dependency with a known vulnerability (any severity) or a license
+  # outside the allow-list. Only changes in the PR count, so unrelated advisories never block.
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: low
+          fail-on-scopes: runtime, development
+          allow-licenses: >-
+            MIT, MIT-0, ISC, Apache-2.0, BSD-2-Clause, BSD-3-Clause, 0BSD, BlueOak-1.0.0,
+            CC0-1.0, CC-BY-4.0, MPL-2.0, Unlicense, Python-2.0
+
+  # Every rule of every bundled plugin must be decided in src/eslint/rules, and any change to the
+  # effective configuration must be reviewed as a snapshot diff. On a Dependabot plugin bump this
+  # job names the new rules that need a decision.
+  rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Rule inventory and effective-config snapshots
+        run: pnpm exec vitest run test/rule-inventory.test.mjs test/effective-config.test.mjs --coverage.enabled=false
+
+  # Dependabot PRs merge themselves once the required check passes (a plugin bump that adds rules
+  # waits on the rules job). Runs as the devenvy-bot app so the merge triggers release.yml.
+  # Needs the org Dependabot secrets DEVENVY_BOT_CLIENT_ID and DEVENVY_BOT_PRIVATE_KEY.
+  dependabot-auto-merge:
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.DEVENVY_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.DEVENVY_BOT_PRIVATE_KEY }}
+          # enabling auto-merge
+          permission-contents: write
+          permission-pull-requests: write
+      - name: Enable auto-merge
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge "$PR_URL" --auto --squash
+
+  # Single required status check.
+  result:
+    if: always()
+    needs: [pr-title, lint, test, build, audit, dependency-review, rules]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: All jobs passed
+        env:
+          PR_TITLE: ${{ needs.pr-title.result }}
+          DEPENDENCY_REVIEW: ${{ needs.dependency-review.result }}
+          LINT: ${{ needs.lint.result }}
+          TEST: ${{ needs.test.result }}
+          BUILD: ${{ needs.build.result }}
+          AUDIT: ${{ needs.audit.result }}
+          RULES: ${{ needs.rules.result }}
+          IS_PR: ${{ github.event_name == 'pull_request' }}
+        # pr-title and dependency-review only run on pull requests; the audit is informational there
+        run: |
+          for result in "$LINT" "$TEST" "$BUILD" "$RULES"; do test "$result" = "success"; done
+          if [ "$IS_PR" = "true" ]; then
+            test "$PR_TITLE" = "success"
+            test "$DEPENDENCY_REVIEW" = "success"
+          else
+            test "$AUDIT" = "success"
+          fi
