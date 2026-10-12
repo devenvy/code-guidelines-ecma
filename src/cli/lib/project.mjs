@@ -9,14 +9,68 @@ const LOCKFILES = /** @type {const} */ ([
   ['yarn.lock', 'yarn'],
   ['bun.lock', 'bun'],
   ['bun.lockb', 'bun'],
+  ['package-lock.json', 'npm'],
 ]);
+
+/**
+ * `dir` and its ancestors up to the repository root (the nearest directory with `.git`), nearest
+ * first. Outside a repository only `dir` itself, so nothing above the project is ever used.
+ * @param {string} dir
+ * @returns {string[]}
+ */
+function projectDirs(dir) {
+  const dirs = [];
+  let current = path.resolve(dir);
+  let parent = path.dirname(current);
+  while (!existsSync(path.join(current, '.git')) && parent !== current) {
+    dirs.push(current);
+    current = parent;
+    parent = path.dirname(current);
+  }
+  return existsSync(path.join(current, '.git')) ? [...dirs, current] : [path.resolve(dir)];
+}
+
+/**
+ * The nearest lockfile within the repository (a workspace package's lockfile is usually at the
+ * workspace root).
+ * @param {string} dir
+ * @returns {{ packageManager: PackageManager, root: string } | undefined}
+ */
+function nearestLockfile(dir) {
+  for (const current of projectDirs(dir)) {
+    const match = LOCKFILES.find(([lockfile]) => existsSync(path.join(current, lockfile)));
+    if (match) {
+      return { packageManager: match[1], root: current };
+    }
+  }
+  return undefined;
+}
 
 /**
  * @param {string} dir
  * @returns {PackageManager}
  */
 export function detectPackageManager(dir) {
-  return LOCKFILES.find(([lockfile]) => existsSync(path.join(dir, lockfile)))?.[1] ?? 'npm';
+  return nearestLockfile(dir)?.packageManager ?? 'npm';
+}
+
+/**
+ * pnpm-workspace.yaml of a pnpm project, relative to `dir`: the nearest existing one within the
+ * repository (the workspace's, for a workspace package), else a new one next to the lockfile.
+ * `null` when the project does not use pnpm.
+ * @param {string} dir
+ * @returns {string | null}
+ */
+export function pnpmWorkspaceFile(dir) {
+  const lockfile = nearestLockfile(dir);
+  if (lockfile?.packageManager !== 'pnpm') {
+    return null;
+  }
+  const found = projectDirs(dir).find((current) =>
+    existsSync(path.join(current, 'pnpm-workspace.yaml')),
+  );
+  const file = path.join(found ?? lockfile.root, 'pnpm-workspace.yaml');
+  return path.relative(dir, file).replaceAll('\\', '/');
 }
 
 /**

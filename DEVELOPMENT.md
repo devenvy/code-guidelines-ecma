@@ -18,16 +18,16 @@ Prettier and TypeScript resolve the package name exactly as consumers do (pnpm o
 
 ## Layout
 
-| Path                      |                                                                                                                      |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| `src/eslint/rules/*.mjs`  | Rule tables — the effective configuration                                                                            |
-| `src/eslint/layers/*.mjs` | Flat-config blocks per layer, composed by `createConfig`                                                             |
-| `src/prettier/`           | Prettier configs                                                                                                     |
-| `src/cli/`                | `init` / `check` / `sync`                                                                                            |
-| `templates/`              | Managed-block contents                                                                                               |
-| `tsconfig/`               | Published tsconfig bases                                                                                             |
-| `test/fixtures/`          | Plain JS, Node/TS and Angular projects linted by the tests; `workflows/` is the smallest repo layout `check` accepts |
-| `scripts/repo-settings/`  | GitHub settings baseline (not published)                                                                             |
+| Path                      |                                                                                                                                         |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/eslint/rules/*.mjs`  | Rule tables — the effective configuration                                                                                               |
+| `src/eslint/layers/*.mjs` | Flat-config blocks per layer, composed by `createConfig`; optional peers load through `src/eslint/peer.mjs` only when their layer is on |
+| `src/prettier/`           | Prettier configs                                                                                                                        |
+| `src/cli/`                | `init` / `check` / `sync`                                                                                                               |
+| `templates/`              | Managed-block contents                                                                                                                  |
+| `tsconfig/`               | Published tsconfig bases                                                                                                                |
+| `test/fixtures/`          | Plain JS, Node/TS and Angular projects linted by the tests; `workflows/` is the smallest repo layout `check` accepts                    |
+| `scripts/repo-settings/`  | GitHub settings baseline (not published)                                                                                                |
 
 ## Tests
 
@@ -36,7 +36,9 @@ Prettier and TypeScript resolve the package name exactly as consumers do (pnpm o
 - **lint** — runs ESLint on the fixtures and asserts the exact rules reported per file.
 - **cli / cli-lib** — init, check (including the CI convention) and sync against temp projects.
 - **pack** — packs the tarball, installs it with npm into fresh consumer projects and runs the full
-  consumer workflow, including `ngc` failing on a template type error.
+  consumer workflow, including `ngc` failing on a template type error. Also asserts that a plain
+  JavaScript consumer installs no TypeScript, Angular or Vitest packages, and a Node consumer no
+  Angular packages.
 
 ## Pull request titles
 

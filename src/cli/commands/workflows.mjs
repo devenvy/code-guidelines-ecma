@@ -44,9 +44,22 @@ const REQUIRED_FILES = /** @type {const} */ ([
  * @returns {string[]}
  */
 export function ciScripts(choices) {
-  return ['guidelines:check', 'lint', 'format:check', 'typecheck', 'knip'].concat(
-    choices.vitest ? ['test:ci'] : [],
-  );
+  return [...lintScripts(choices), ...(choices.vitest ? ['test:ci'] : [])];
+}
+
+/**
+ * Scripts the lint job runs (plain JavaScript projects have no typecheck).
+ * @param {import('../managed.mjs').Choices} choices
+ * @returns {string[]}
+ */
+function lintScripts(choices) {
+  return [
+    'guidelines:check',
+    'lint',
+    'format:check',
+    ...(choices.typescript ? ['typecheck'] : []),
+    'knip',
+  ];
 }
 
 /**
@@ -113,7 +126,7 @@ function checkCi(ci, choices) {
 
   /** @type {[string, unknown, string[]][]} */
   const expectations = [
-    ['lint', lint, ['guidelines:check', 'lint', 'format:check', 'typecheck', 'knip']],
+    ['lint', lint, lintScripts(choices)],
     ['test', test, choices.vitest ? ['test:ci'] : []],
   ];
   for (const [name, job, scripts] of expectations) {

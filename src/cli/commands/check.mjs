@@ -6,10 +6,12 @@ import {
   ESLINT_CONFIG_FILES,
   findFiles,
   LEGACY_ESLINT_FILES,
+  pnpmWorkspaceFile,
   PRETTIER_CONFIG_FILES,
 } from '../lib/project.mjs';
 import { lineDiff, readText } from '../lib/text.mjs';
-import { managedBlocks, managedJson, prettierConfigFor } from '../managed.mjs';
+import { undecidedBuilds } from '../lib/yaml.mjs';
+import { managedBlocks, managedJson, PNPM_BUILDS, prettierConfigFor } from '../managed.mjs';
 import { readChoices } from './choices.mjs';
 import { checkWorkflows, ciScripts } from './workflows.mjs';
 
@@ -31,9 +33,10 @@ export function check(dir) {
   const problems = [
     ...checkBlocks(dir),
     ...checkJson(dir, choices),
+    ...checkPnpmBuilds(dir),
     ...checkEslint(dir, choices),
     ...checkPrettier(dir, choices),
-    ...checkTsconfig(dir),
+    ...(choices.typescript ? checkTsconfig(dir) : []),
     ...checkScripts(dir, choices),
     ...(choices.workflows === false ? [] : checkWorkflows(dir, choices)),
   ];
@@ -90,6 +93,23 @@ function checkJson(dir, choices) {
     }
     return diffJson(text, json.entries, json.file).map((message) => ({ file: json.file, message }));
   });
+}
+
+/**
+ * pnpm projects must decide the build scripts our dependencies bring in.
+ * @param {string} dir
+ * @returns {Problem[]}
+ */
+function checkPnpmBuilds(dir) {
+  const workspace = pnpmWorkspaceFile(dir);
+  if (!workspace) {
+    return [];
+  }
+  const { text } = readText(path.join(dir, workspace));
+  return undecidedBuilds(text, Object.keys(PNPM_BUILDS), workspace).map((name) => ({
+    file: workspace,
+    message: `allowBuilds must set "${name}" to true or false (pnpm install fails otherwise)`,
+  }));
 }
 
 /**

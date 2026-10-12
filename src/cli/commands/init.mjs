@@ -66,8 +66,10 @@ export async function init(dir, flags) {
     }
   }
 
-  // 2. tsconfig
-  output.push(...writeTsconfig(dir, choices));
+  // 2. tsconfig (plain JavaScript projects have none)
+  if (choices.typescript) {
+    output.push(...writeTsconfig(dir, choices));
+  }
 
   // 3. consumer-owned files, only when absent
   const eslintFile = path.join(dir, 'eslint.config.mjs');
@@ -122,20 +124,30 @@ export async function init(dir, flags) {
   );
   output.push(...warnings);
 
-  // 7. peers (node.json sets types: ["node"], so Node/TS projects need @types/node)
-  const peers = [
-    'eslint',
-    'typescript',
-    'prettier',
-    'knip',
-    ...(choices.angular ? ['angular-eslint'] : []),
-    ...(choices.env === 'node' && choices.typescript ? ['@types/node'] : []),
-  ];
-  const missing = missingPackages(dir, peers);
+  // 7. peers: only what the chosen features use
+  const missing = missingPackages(dir, peersFor(choices));
   if (missing.length > 0) {
     output.push('', `Install missing peers: ${installCommand(detectPackageManager(dir), missing)}`);
   }
   return { ok: true, output };
+}
+
+/**
+ * Packages the project installs itself for the chosen features. (node.json sets
+ * types: ["node"], so Node/TS projects need @types/node.)
+ * @param {import('../managed.mjs').Choices} choices
+ * @returns {string[]}
+ */
+function peersFor(choices) {
+  return [
+    'eslint',
+    'prettier',
+    'knip',
+    ...(choices.typescript ? ['typescript', 'typescript-eslint'] : []),
+    ...(choices.angular ? ['angular-eslint'] : []),
+    ...(choices.vitest ? ['@vitest/eslint-plugin'] : []),
+    ...(choices.env === 'node' && choices.typescript ? ['@types/node'] : []),
+  ];
 }
 
 /**
@@ -274,18 +286,12 @@ function sameValue(a, b) {
  * @returns {Record<string, string>}
  */
 function scriptsFor(dir, choices) {
-  let typecheck = 'tsc --noEmit';
-  if (choices.angular) {
-    typecheck = existsSync(path.join(dir, 'tsconfig.spec.json'))
-      ? 'ngc -p tsconfig.app.json --noEmit && tsc -p tsconfig.spec.json --noEmit'
-      : 'ngc -p tsconfig.app.json --noEmit';
-  }
   /** @type {Record<string, string>} */
   const scripts = {
     lint: 'eslint . --max-warnings 0',
     format: 'prettier --write .',
     'format:check': 'prettier --check .',
-    typecheck,
+    ...typecheckScript(dir, choices),
     knip: 'knip',
     'guidelines:check': 'code-guidelines check',
   };
@@ -296,4 +302,21 @@ function scriptsFor(dir, choices) {
       : 'vitest run --coverage';
   }
   return scripts;
+}
+
+/**
+ * Plain JavaScript projects have no TypeScript, so no typecheck.
+ * @param {string} dir
+ * @param {import('../managed.mjs').Choices} choices
+ * @returns {{ typecheck?: string }}
+ */
+function typecheckScript(dir, choices) {
+  if (choices.angular) {
+    return {
+      typecheck: existsSync(path.join(dir, 'tsconfig.spec.json'))
+        ? 'ngc -p tsconfig.app.json --noEmit && tsc -p tsconfig.spec.json --noEmit'
+        : 'ngc -p tsconfig.app.json --noEmit',
+    };
+  }
+  return choices.typescript ? { typecheck: 'tsc --noEmit' } : {};
 }

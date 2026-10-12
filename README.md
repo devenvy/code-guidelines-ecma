@@ -13,31 +13,54 @@ Angular repositories. The ECMAScript sibling of
 ## Quick start
 
 ```sh
+# Plain JavaScript (browser)
+pnpm add -D --allow-build '!unrs-resolver' @devenvy/code-guidelines eslint prettier knip
+pnpm exec code-guidelines init --env browser --no-typescript
+
 # Node / TypeScript
-pnpm add -D @devenvy/code-guidelines eslint typescript prettier knip @types/node
-pnpm exec code-guidelines init --env node --vitest
+pnpm add -D --allow-build '!unrs-resolver' @devenvy/code-guidelines eslint prettier knip typescript typescript-eslint @types/node
+pnpm exec code-guidelines init --env node
 
 # Angular
-pnpm add -D @devenvy/code-guidelines eslint typescript prettier knip angular-eslint
-pnpm exec code-guidelines init --angular --prefix app --vitest
-
-# Plain JavaScript (browser)
-pnpm add -D @devenvy/code-guidelines eslint typescript prettier knip
-pnpm exec code-guidelines init --env browser --no-typescript
+pnpm add -D --allow-build '!unrs-resolver' @devenvy/code-guidelines eslint prettier knip typescript typescript-eslint angular-eslint
+pnpm exec code-guidelines init --angular --prefix app
 ```
 
 npm works the same way (`npm i -D …`, `npx code-guidelines …`).
 
+`--allow-build '!unrs-resolver'` records pnpm's decision not to run the install script of
+`unrs-resolver` (the import plugin's resolver; its prebuilt binary installs without it). pnpm fails
+installs while a build script is undecided, so `init` also sets `allowBuilds: unrs-resolver: false`
+in `pnpm-workspace.yaml` (the workspace root's, for a workspace package) unless it is already
+`true` or `false`, and `check` requires a decision. A project that uses pnpm's `permissions`
+setting decides it there instead, and `init` and `check` leave the file alone.
+
+A project installs only the tools for the features it uses. Everything beyond ESLint, Prettier
+and knip is an optional peer that is loaded only when its feature is on:
+
+| Feature               | Install                           |
+| --------------------- | --------------------------------- |
+| every project         | `eslint`, `prettier`, `knip`      |
+| TypeScript (default)  | `typescript`, `typescript-eslint` |
+| Angular (`--angular`) | `angular-eslint`                  |
+| Vitest (`--vitest`)   | `@vitest/eslint-plugin`           |
+
+`init` prints the install command for any of these that are missing, and turning a feature on
+without its package fails with the command to run. A plain JavaScript project never needs
+TypeScript, with one exception: `@vitest/eslint-plugin` is built on typescript-eslint's utilities,
+so enabling Vitest brings `typescript` in as a dependency of that plugin (nothing to configure).
+
 `init` writes:
 
-| File                                                 | What                                                                                                                                                           |
-| ---------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eslint.config.mjs`                                  | `createConfig({...})` with your choices (created if absent)                                                                                                    |
-| `tsconfig.json`                                      | extends `@devenvy/code-guidelines/tsconfig/<base>.json`; an existing one is migrated and options the base already sets are removed                             |
-| `package.json`                                       | `"prettier"` key, scripts (`lint`, `format`, `format:check`, `typecheck`, `knip`, `guidelines:check`, `test:ci`) and a `codeGuidelines` record of your choices |
-| `.nvmrc`                                             | `24` (created if absent)                                                                                                                                       |
-| `.editorconfig`, `.gitattributes`, `.prettierignore` | a managed block; your own content outside it is kept                                                                                                           |
-| `.vscode/extensions.json`, `.vscode/settings.json`   | recommended extensions and format/fix-on-save keys merged in; your other settings are kept                                                                     |
+| File                                                 | What                                                                                                                                                                                          |
+| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eslint.config.mjs`                                  | `createConfig({...})` with your choices (created if absent)                                                                                                                                   |
+| `tsconfig.json`                                      | TypeScript projects: extends `@devenvy/code-guidelines/tsconfig/<base>.json`; an existing one is migrated and options the base already sets are removed                                       |
+| `package.json`                                       | `"prettier"` key, scripts (`lint`, `format`, `format:check`, `typecheck` for TypeScript, `knip`, `guidelines:check`, `test:ci` with `--vitest`) and a `codeGuidelines` record of your choices |
+| `.nvmrc`                                             | `24` (created if absent)                                                                                                                                                                      |
+| `.editorconfig`, `.gitattributes`, `.prettierignore` | a managed block; your own content outside it is kept                                                                                                                                          |
+| `.vscode/extensions.json`, `.vscode/settings.json`   | recommended extensions and format/fix-on-save keys merged in; your other settings are kept                                                                                                    |
+| `pnpm-workspace.yaml`                                | pnpm projects: `allowBuilds` decision for `unrs-resolver` if missing; your other settings are kept                                                                                            |
 
 Existing `eslint.config.*`, `.eslintrc*`, `.prettierrc*` or `prettier.config.*` files stop `init`
 before it writes anything. Re-run with `--force` to replace them.
@@ -66,7 +89,7 @@ export default createConfig(
 | ---------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `rootDir`              | required | Directory of the root tsconfig, usually `import.meta.dirname`                                                                                                                                     |
 | `env`                  | required | `'browser'` or `'node'` globals for source files. Root tool configs (`*.config.*`) always get Node globals                                                                                        |
-| `typescript`           | `true`   | Type-aware typescript-eslint for `.ts/.mts/.cts`                                                                                                                                                  |
+| `typescript`           | `true`   | Type-aware typescript-eslint for `.ts/.mts/.cts`. `false` for plain JavaScript (no TypeScript packages needed)                                                                                    |
 | `untypedFiles`         | `[]`     | TS files outside every tsconfig (e.g. `['scripts/**']`), linted without type information. Root `*.config.ts` files are always untyped                                                             |
 | `vitest`               | `false`  | `true` or `{ files }`. Default files: `**/*.{spec,test}.{ts,mts,cts,js,mjs,cjs}`                                                                                                                  |
 | `angular`              | `false`  | `{ prefix, controlComponents? }`. `prefix` is a string or array for component/directive selectors. `controlComponents` lists components that render their own form control, for label association |
@@ -131,7 +154,7 @@ everything else is Prettier's default.
 | `node.json`    | `module`/`moduleResolution: nodenext`, ES2023, `types: ["node"]`                                                                                                                                                                             |
 | `browser.json` | `module: preserve`, `moduleResolution: bundler`, DOM libs                                                                                                                                                                                    |
 | `angular.json` | browser + `experimentalDecorators`, `importHelpers`, and `angularCompilerOptions` `strictTemplates`, `strictInjectionParameters`, `strictInputAccessModifiers`                                                                               |
-| `js.json`      | `allowJs`, `checkJs`, `noEmit` for type-checking plain JavaScript (use JSDoc types)                                                                                                                                                          |
+| `js.json`      | `allowJs`, `checkJs`, `noEmit` for type-checking plain JavaScript with JSDoc types. Not set up by `init`: opt in by installing `typescript` and extending it                                                                                 |
 
 TypeScript is `~6.0`: typescript-eslint and the Angular compiler do not support TypeScript 7 yet.
 
@@ -167,8 +190,8 @@ Each repo owns its workflows (no shared/reusable workflows). The DevEnvy convent
 
 - **`ci.yml`** (pull requests and a weekly run), one job each:
   - `pr-title`: the PR title is a conventional commit.
-  - `lint`: `guidelines:check`, `lint`, `format:check`, `typecheck`, `knip` (unused files,
-    exports and dependencies), [actionlint](https://github.com/rhysd/actionlint) and
+  - `lint`: `guidelines:check`, `lint`, `format:check`, `typecheck` (TypeScript projects),
+    `knip` (unused files, exports and dependencies), [actionlint](https://github.com/rhysd/actionlint) and
     [zizmor](https://docs.zizmor.sh) (GitHub Actions security).
   - `test`: `test:ci` with coverage thresholds and a PR summary.
   - `build`, plus repo-specific jobs (e.g. a container smoke test, or package checks).
