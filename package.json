@@ -63,7 +63,7 @@
     "test": "vitest run",
     "test:ci": "vitest run",
     "build:types": "tsc -p tsconfig.build.json",
-    "check:package": "publint --strict --pack pnpm && attw --pack . --profile esm-only",
+    "check:package": "pnpm run build:types && publint --strict --pack pnpm && attw --pack . --profile esm-only",
     "prepack": "pnpm run build:types",
     "guidelines:check": "code-guidelines check"
   },
