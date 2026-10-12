@@ -25,6 +25,8 @@ const WORKFLOWS = path.join(import.meta.dirname, 'fixtures/workflows');
 function project(files = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'cg-cli-'));
   dirs.push(dir);
+  // a repository root: lockfile detection never looks above it
+  mkdirSync(path.join(dir, '.git'));
   cpSync(WORKFLOWS, dir, { recursive: true });
   const all = {
     'package.json': '{\n  "name": "demo",\n  "scripts": {\n    "build": "x"\n  }\n}\n',
@@ -60,7 +62,9 @@ describe('init', () => {
       compilerOptions: {},
       exclude: ['node_modules', 'dist', 'coverage', '*.config.*'],
     });
-    expect(result.output.join('\n')).toContain('@types/node');
+    expect(result.output.at(-1)).toBe(
+      'Install missing peers: npm i -D eslint prettier knip typescript typescript-eslint @vitest/eslint-plugin @types/node',
+    );
     const pkg = json(dir, 'package.json');
     expect(pkg.prettier).toBe('@devenvy/code-guidelines/prettier');
     expect(pkg.codeGuidelines).toEqual({
@@ -88,7 +92,11 @@ describe('init', () => {
 
   it('sets up an angular project with the angular prettier config', async () => {
     const dir = project({ 'tsconfig.spec.json': '{}' });
-    expect((await cli(dir, 'init', '--angular', '--prefix', 'sw')).code).toBe(0);
+    const result = await cli(dir, 'init', '--angular', '--prefix', 'sw');
+    expect(result.code).toBe(0);
+    expect(result.output.at(-1)).toBe(
+      'Install missing peers: npm i -D eslint prettier knip typescript typescript-eslint angular-eslint',
+    );
     expect(read(dir, 'eslint.config.mjs')).toContain("angular: { prefix: 'sw' }");
     expect(read(dir, 'eslint.config.mjs')).toContain("env: 'browser'");
     const pkg = json(dir, 'package.json');
@@ -113,17 +121,156 @@ describe('init', () => {
     expect(result.output[0]).toContain('--prefix must be lowercase kebab-case');
   });
 
-  it('sets up a plain JavaScript project', async () => {
+  it('sets up a plain JavaScript project without TypeScript', async () => {
     const dir = project();
-    expect((await cli(dir, 'init', '--env', 'browser', '--no-typescript')).code).toBe(0);
+    const result = await cli(dir, 'init', '--env', 'browser', '--no-typescript');
+    expect(result.code).toBe(0);
+    expect(result.output.at(-1)).toBe('Install missing peers: npm i -D eslint prettier knip');
     expect(read(dir, 'eslint.config.mjs')).toContain('typescript: false');
-    expect(json(dir, 'tsconfig.json')).toEqual({
-      extends: '@devenvy/code-guidelines/tsconfig/js.json',
-      compilerOptions: {},
-      exclude: ['node_modules', 'dist', 'coverage', '*.config.*'],
-    });
+    expect(existsSync(path.join(dir, 'tsconfig.json'))).toBe(false);
+    expect(json(dir, 'package.json').scripts.typecheck).toBeUndefined();
     expect(json(dir, '.vscode/settings.json')['typescript.tsdk']).toBeUndefined();
+    expect(await cli(dir, 'check')).toEqual({
+      code: 0,
+      output: ['code-guidelines: everything matches.'],
+    });
+  });
+
+  it('decides pnpm build scripts in a pnpm project, keeping existing decisions', async () => {
+    const dir = project({
+      'pnpm-lock.yaml': "lockfileVersion: '9.0'\n",
+      'pnpm-workspace.yaml': '# ours\nallowBuilds:\n  esbuild: true\n',
+    });
+    expect((await cli(dir, 'init', '--env', 'node')).output).toContain(
+      'updated pnpm-workspace.yaml',
+    );
+    expect(read(dir, 'pnpm-workspace.yaml')).toBe(
+      '# ours\nallowBuilds:\n  esbuild: true\n  unrs-resolver: false\n',
+    );
     expect((await cli(dir, 'check')).code).toBe(0);
+
+    writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), 'allowBuilds: {}\n');
+    expect((await cli(dir, 'check')).output).toContain(
+      'pnpm-workspace.yaml: allowBuilds must set "unrs-resolver" to true or false (pnpm install fails otherwise)',
+    );
+    writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), 'allowBuilds:\n  unrs-resolver: true\n');
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+
+  it.each([
+    [
+      'an empty allowBuilds, keeping its comment',
+      'allowBuilds:\n  # esbuild: true\n',
+      'allowBuilds:\n  # esbuild: true\n  unrs-resolver: false\n',
+    ],
+    [
+      "pnpm's undecided placeholder",
+      'allowBuilds:\n  unrs-resolver: set this to true or false\n',
+      'allowBuilds:\n  unrs-resolver: false\n',
+    ],
+  ])('decides unrs-resolver over %s, in init and in sync', async (_case, workspace, decided) => {
+    const dir = project({ 'pnpm-lock.yaml': '', 'pnpm-workspace.yaml': workspace });
+    await cli(dir, 'init', '--env', 'node');
+    expect(read(dir, 'pnpm-workspace.yaml')).toBe(decided);
+
+    writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), workspace);
+    expect((await cli(dir, 'check')).output.join('\n')).toContain('allowBuilds must set');
+    await cli(dir, 'sync');
+    expect(read(dir, 'pnpm-workspace.yaml')).toBe(decided);
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+
+  it('keeps long pnpm-workspace.yaml values on one line', async () => {
+    const long = `overrides:\n  pkg: https://example.com/${'x'.repeat(120)}.tgz\n`;
+    const dir = project({ 'pnpm-lock.yaml': '', 'pnpm-workspace.yaml': long });
+    await cli(dir, 'init', '--env', 'node');
+    expect(read(dir, 'pnpm-workspace.yaml')).toBe(`${long}allowBuilds:\n  unrs-resolver: false\n`);
+  });
+
+  it("leaves build decisions to pnpm's permissions setting when it is used", async () => {
+    const workspace = 'permissions:\n  unrs-resolver: deny\n';
+    const dir = project({ 'pnpm-lock.yaml': '', 'pnpm-workspace.yaml': workspace });
+    await cli(dir, 'init', '--env', 'node');
+    expect(read(dir, 'pnpm-workspace.yaml')).toBe(workspace);
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+
+  it('uses the workspace root lockfile and pnpm-workspace.yaml for a workspace package', async () => {
+    const root = project({ 'pnpm-lock.yaml': '', 'pnpm-workspace.yaml': "packages: ['apps/*']\n" });
+    const dir = path.join(root, 'apps/web');
+    mkdirSync(dir, { recursive: true });
+    cpSync(WORKFLOWS, dir, { recursive: true });
+    writeFileSync(path.join(dir, 'package.json'), '{ "name": "web" }\n');
+    const result = await cli(dir, 'init', '--env', 'node');
+    expect(result.output).toContain('updated ../../pnpm-workspace.yaml');
+    expect(result.output.at(-1)).toMatch(/^Install missing peers: pnpm add -D /);
+    expect(read(root, 'pnpm-workspace.yaml')).toBe(
+      "packages: ['apps/*']\nallowBuilds:\n  unrs-resolver: false\n",
+    );
+    expect(existsSync(path.join(dir, 'pnpm-workspace.yaml'))).toBe(false);
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+
+  it("updates the workspace's pnpm-workspace.yaml for a package with its own lockfile", async () => {
+    // sharedWorkspaceLockfile: false gives every workspace package its own pnpm-lock.yaml
+    const root = project({ 'pnpm-lock.yaml': '', 'pnpm-workspace.yaml': "packages: ['apps/*']\n" });
+    const dir = path.join(root, 'apps/web');
+    mkdirSync(dir, { recursive: true });
+    cpSync(WORKFLOWS, dir, { recursive: true });
+    writeFileSync(path.join(dir, 'package.json'), '{ "name": "web" }\n');
+    writeFileSync(path.join(dir, 'pnpm-lock.yaml'), '');
+    expect((await cli(dir, 'init', '--env', 'node')).output).toContain(
+      'updated ../../pnpm-workspace.yaml',
+    );
+    expect(existsSync(path.join(dir, 'pnpm-workspace.yaml'))).toBe(false);
+  });
+
+  it('never looks above a project that is not in a git repository', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'cg-home-'));
+    dirs.push(home);
+    writeFileSync(path.join(home, 'pnpm-lock.yaml'), '');
+    const dir = path.join(home, 'proj');
+    mkdirSync(dir);
+    cpSync(WORKFLOWS, dir, { recursive: true });
+    writeFileSync(path.join(dir, 'package.json'), '{ "name": "proj" }\n');
+    const result = await cli(dir, 'init', '--env', 'node');
+    expect(result.output.at(-1)).toMatch(/^Install missing peers: npm i -D /);
+    expect(existsSync(path.join(home, 'pnpm-workspace.yaml'))).toBe(false);
+    expect(existsSync(path.join(dir, 'pnpm-workspace.yaml'))).toBe(false);
+  });
+
+  it.each([
+    ['a list', '- a\n', /pnpm-workspace.yaml must be a YAML map/],
+    ['allowBuilds set to a list', 'allowBuilds: [esbuild]\n', /allowBuilds must map package names/],
+  ])('reports a pnpm-workspace.yaml that is %s', async (_case, workspace, message) => {
+    const dir = project({ 'pnpm-lock.yaml': '' });
+    await cli(dir, 'init', '--env', 'node');
+    writeFileSync(path.join(dir, 'pnpm-workspace.yaml'), workspace);
+    for (const command of ['check', 'sync']) {
+      const result = await cli(dir, command);
+      expect(result.code).toBe(1);
+      expect(result.output[0]).toMatch(message);
+    }
+  });
+
+  it('leaves pnpm-workspace.yaml alone outside pnpm projects', async () => {
+    const dir = project();
+    await cli(dir, 'init', '--env', 'node');
+    expect(existsSync(path.join(dir, 'pnpm-workspace.yaml'))).toBe(false);
+  });
+
+  it('reports an invalid pnpm-workspace.yaml', async () => {
+    const dir = project({ 'pnpm-lock.yaml': '', 'pnpm-workspace.yaml': 'allowBuilds: [\n' });
+    expect((await cli(dir, 'init', '--env', 'node')).output[0]).toMatch(
+      /^code-guidelines: pnpm-workspace.yaml is not valid YAML \(.+\); fix it and re-run$/,
+    );
+  });
+
+  it('asks a plain JavaScript project with vitest only for the vitest plugin', async () => {
+    const result = await cli(project(), 'init', '--env', 'node', '--no-typescript', '--vitest');
+    expect(result.output.at(-1)).toBe(
+      'Install missing peers: npm i -D eslint prettier knip @vitest/eslint-plugin',
+    );
   });
 
   it('prints usage for unknown flags and commands', async () => {
@@ -420,6 +567,22 @@ describe('check: CI convention', () => {
     delete pkg.scripts.knip;
     writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
     expect(await problems(dir)).toContain('package.json: missing script "knip" (CI runs it)');
+  });
+
+  it('requires typecheck in CI only for TypeScript projects', async () => {
+    const withoutTypecheck = (/** @type {string} */ dir) =>
+      writeFileSync(
+        path.join(dir, CI),
+        read(dir, CI).replace('      - run: pnpm run typecheck\n', ''),
+      );
+    const ts = await initialised();
+    withoutTypecheck(ts);
+    expect(await problems(ts)).toContain(`${CI}: job "lint" must run the "typecheck" script`);
+
+    const js = project();
+    await cli(js, 'init', '--env', 'browser', '--no-typescript');
+    withoutTypecheck(js);
+    expect((await cli(js, 'check')).code).toBe(0);
   });
 
   it('skips the workflow checks with codeGuidelines.workflows: false', async () => {

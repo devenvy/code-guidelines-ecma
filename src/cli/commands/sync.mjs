@@ -4,8 +4,10 @@ import path from 'node:path';
 import { upsertBlock } from '../lib/blocks.mjs';
 import { formatWritten } from '../lib/format.mjs';
 import { mergeJson } from '../lib/json.mjs';
+import { pnpmWorkspaceFile } from '../lib/project.mjs';
 import { lineDiff, readText, writeText } from '../lib/text.mjs';
-import { managedBlocks, managedJson } from '../managed.mjs';
+import { decideBuilds } from '../lib/yaml.mjs';
+import { managedBlocks, managedJson, PNPM_BUILDS } from '../managed.mjs';
 import { readChoices } from './choices.mjs';
 
 /**
@@ -40,6 +42,14 @@ export function planManaged(dir, choices) {
     const after = mergeJson(text, json.entries, json.file);
     if (after !== text) {
       changes.push({ file: json.file, before: text, after, eol });
+    }
+  }
+  const workspace = pnpmWorkspaceFile(dir);
+  if (workspace) {
+    const { text, eol } = readText(path.join(dir, workspace));
+    const after = decideBuilds(text, PNPM_BUILDS, workspace);
+    if (after !== text) {
+      changes.push({ file: workspace, before: text, after, eol });
     }
   }
   return changes;

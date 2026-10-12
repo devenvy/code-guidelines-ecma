@@ -1,10 +1,11 @@
 /*
  * Packs the real tarball, installs it with npm into throwaway consumer projects and runs the
- * consumer workflow end to end: init, eslint, prettier --check, typecheck, check.
+ * consumer workflow end to end: init, eslint, prettier --check, typecheck, knip, check. Also
+ * asserts that each kind of consumer installs only what its features need.
  * Slow (network + installs); set SKIP_PACK_TEST=1 to skip locally.
  */
 import { execSync } from 'node:child_process';
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -84,12 +85,31 @@ function consumer(spec) {
   return dir;
 }
 
-/** @param {string} dir */
-function expectWorkflowPasses(dir) {
+/** Packages that belong to features a consumer may not use. */
+const TYPESCRIPT_PACKAGES = ['typescript', 'typescript-eslint', '@typescript-eslint/parser'];
+const ANGULAR_PACKAGES = ['angular-eslint', '@angular-eslint/eslint-plugin', '@angular/core'];
+const VITEST_PACKAGES = ['@vitest/eslint-plugin', 'vitest'];
+
+/**
+ * npm installs flat, so anything pulled in at any depth shows up in the root node_modules.
+ * @param {string} dir
+ * @param {string[]} names
+ */
+function expectNotInstalled(dir, names) {
+  const installed = names.filter((name) => existsSync(path.join(dir, 'node_modules', name)));
+  expect(installed).toEqual([]);
+}
+
+/**
+ * @param {string} dir
+ * @param {{ typecheck?: boolean, knip?: boolean }} [options]
+ */
+function expectWorkflowPasses(dir, { typecheck = true, knip = true } = {}) {
   for (const command of [
     'npx eslint . --max-warnings 0',
     'npx prettier --check .',
-    'npm run typecheck',
+    ...(typecheck ? ['npm run typecheck'] : []),
+    ...(knip ? ['npx knip'] : []),
     'npx code-guidelines check',
   ]) {
     const result = sh(command, dir);
@@ -104,11 +124,53 @@ describe.skipIf(process.env.SKIP_PACK_TEST)('packed package', () => {
       const dir = consumer({
         fixture: 'plain-js',
         files: ['clean.js'],
-        pkg: { name: 'plain', private: true, type: 'module' },
-        install: [version('eslint'), version('typescript'), version('prettier')],
+        pkg: { name: 'plain', private: true, type: 'module', main: 'clean.js' },
+        install: [version('eslint'), version('prettier'), version('knip')],
         init: '--env browser --no-typescript',
       });
-      expectWorkflowPasses(dir);
+      expectNotInstalled(dir, [...TYPESCRIPT_PACKAGES, ...ANGULAR_PACKAGES, ...VITEST_PACKAGES]);
+      expect(existsSync(path.join(dir, 'tsconfig.json'))).toBe(false);
+      expectWorkflowPasses(dir, { typecheck: false });
+    },
+    PACK_TIMEOUT,
+  );
+
+  it(
+    'plain JavaScript consumer with vitest',
+    () => {
+      const dir = consumer({
+        fixture: 'plain-js',
+        files: ['clean.js'],
+        pkg: { name: 'plain-vitest', private: true, type: 'module', main: 'clean.js' },
+        extra: {
+          'clean.test.js': [
+            "import { expect, it } from 'vitest';",
+            '',
+            "import { greet } from './clean.js';",
+            '',
+            "it('greets', () => {",
+            "  expect(greet('Ada').textContent).toBe('Hello Ada');",
+            '});',
+            '',
+          ].join('\n'),
+        },
+        install: [
+          version('eslint'),
+          version('prettier'),
+          version('knip'),
+          version('vitest'),
+          version('@vitest/eslint-plugin'),
+        ],
+        init: '--env browser --no-typescript --vitest',
+      });
+      // typescript itself arrives through @vitest/eslint-plugin (documented); the TypeScript
+      // tooling and Angular do not
+      expectNotInstalled(dir, [
+        'typescript-eslint',
+        '@typescript-eslint/parser',
+        ...ANGULAR_PACKAGES,
+      ]);
+      expectWorkflowPasses(dir, { typecheck: false });
     },
     PACK_TIMEOUT,
   );
@@ -119,17 +181,21 @@ describe.skipIf(process.env.SKIP_PACK_TEST)('packed package', () => {
       const dir = consumer({
         fixture: 'node-ts',
         files: ['src/clean.ts', 'src/util.ts', 'src/util.spec.ts', 'vitest.config.ts'],
-        pkg: { name: 'node-consumer', private: true, type: 'module' },
+        pkg: { name: 'node-consumer', private: true, type: 'module', main: 'src/clean.ts' },
         tsconfig: '{\n  "compilerOptions": { "noEmit": true },\n  "include": ["src"]\n}\n',
         install: [
           version('eslint'),
           version('typescript'),
+          version('typescript-eslint'),
           version('prettier'),
+          version('knip'),
           version('vitest'),
+          version('@vitest/eslint-plugin'),
           version('@types/node'),
         ],
         init: '--env node --vitest',
       });
+      expectNotInstalled(dir, ANGULAR_PACKAGES);
       expectWorkflowPasses(dir);
     },
     PACK_TIMEOUT,
@@ -193,7 +259,9 @@ describe.skipIf(process.env.SKIP_PACK_TEST)('packed package', () => {
         install: [
           version('eslint'),
           version('typescript'),
+          version('typescript-eslint'),
           version('prettier'),
+          version('knip'),
           version('angular-eslint'),
           version('@angular/core'),
           version('@angular/common'),
@@ -204,13 +272,16 @@ describe.skipIf(process.env.SKIP_PACK_TEST)('packed package', () => {
           version('rxjs'),
           version('tslib'),
           version('vitest'),
+          version('@vitest/eslint-plugin'),
         ],
         init: '--angular --prefix app --vitest',
       });
       expect(readFileSync(path.join(dir, 'tsconfig.json'), 'utf8')).toContain(
         '"extends": "@devenvy/code-guidelines/tsconfig/angular.json"',
       );
-      expectWorkflowPasses(dir);
+      // knip needs a real Angular workspace (angular.json, main.ts) to find entry points; the
+      // fixture is only components
+      expectWorkflowPasses(dir, { knip: false });
 
       // strictTemplates comes from the packaged base: a template type error must fail ngc
       writeFileSync(

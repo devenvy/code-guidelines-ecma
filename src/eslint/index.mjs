@@ -29,10 +29,10 @@ export async function createConfig(options, ...overrides) {
   return [
     ...ignores(normalized),
     ...javascript(normalized),
-    ...typescript(normalized),
+    ...(await typescript(normalized)),
     ...imports(normalized),
     ...(await angular(normalized)),
-    ...vitest(normalized),
+    ...(await vitest(normalized)),
     ...prettier(),
     ...overrides.flat(),
   ];

@@ -1,18 +1,26 @@
-import tseslint from 'typescript-eslint';
-
 import { ROOT_CONFIG_FILES, TS_FILES } from '../files.mjs';
+import { importPeer } from '../peer.mjs';
 import { typescriptRelaxations } from '../rules/test-relaxations.mjs';
 import typescriptRules from '../rules/typescript.mjs';
+
+const MISSING_TYPESCRIPT_ESLINT =
+  'createConfig: TypeScript linting (the default) requires "typescript-eslint". Install it: npm i -D typescript typescript-eslint. For a plain JavaScript project, pass typescript: false.';
 
 /**
  * typescript-eslint with type information via the project service.
  * @param {import('../options.mjs').NormalizedOptions} options
- * @returns {import('eslint').Linter.Config[]}
+ * @param {{ importModule?: import('../peer.mjs').ImportModule }} [deps] test seam for dynamic import
+ * @returns {Promise<import('eslint').Linter.Config[]>}
  */
-export function typescript(options) {
+export async function typescript(options, deps = {}) {
   if (!options.typescript) {
     return [];
   }
+  const tseslint = await importPeer(
+    'typescript-eslint',
+    MISSING_TYPESCRIPT_ESLINT,
+    deps.importModule,
+  );
   const disableTypeChecked = /** @type {import('eslint').Linter.Config} */ (
     tseslint.configs.disableTypeChecked
   );
@@ -20,9 +28,9 @@ export function typescript(options) {
     {
       name: 'devenvy/typescript/rules',
       files: TS_FILES,
-      plugins: { '@typescript-eslint': /** @type {any} */ (tseslint.plugin) },
+      plugins: { '@typescript-eslint': tseslint.plugin },
       languageOptions: {
-        parser: /** @type {any} */ (tseslint.parser),
+        parser: tseslint.parser,
         parserOptions: { projectService: true, tsconfigRootDir: options.rootDir },
       },
       rules: typescriptRules,

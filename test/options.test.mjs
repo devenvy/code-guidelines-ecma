@@ -1,6 +1,21 @@
 import { describe, expect, it } from 'vitest';
 
-import { angular, createConfig, normalizeOptions } from '../src/eslint/index.mjs';
+import {
+  angular,
+  createConfig,
+  normalizeOptions,
+  typescript,
+  vitest,
+} from '../src/eslint/index.mjs';
+import { importPeer } from '../src/eslint/peer.mjs';
+
+/** A dynamic import that fails as if `specifier` were not installed. */
+const notInstalled = (/** @type {string} */ specifier) => () =>
+  Promise.reject(
+    Object.assign(new Error(`Cannot find package '${specifier}' imported from /x/index.mjs`), {
+      code: 'ERR_MODULE_NOT_FOUND',
+    }),
+  );
 
 describe('createConfig options', () => {
   it.each([
@@ -53,6 +68,44 @@ describe('createConfig options', () => {
     await expect(angular(options, { importModule: () => Promise.reject(nested) })).rejects.toThrow(
       '@angular-eslint/utils',
     );
+  });
+
+  it('explains how to install typescript-eslint, or opt out, when it is missing', async () => {
+    const options = normalizeOptions({ rootDir: '.', env: 'node' });
+    await expect(
+      typescript(options, { importModule: notInstalled('typescript-eslint') }),
+    ).rejects.toThrow(
+      'createConfig: TypeScript linting (the default) requires "typescript-eslint". Install it: npm i -D typescript typescript-eslint. For a plain JavaScript project, pass typescript: false.',
+    );
+  });
+
+  it('reports a missing typescript under typescript-eslint as itself', async () => {
+    const options = normalizeOptions({ rootDir: '.', env: 'node' });
+    await expect(typescript(options, { importModule: notInstalled('typescript') })).rejects.toThrow(
+      "Cannot find package 'typescript'",
+    );
+  });
+
+  it('explains how to install the vitest plugin when it is missing', async () => {
+    const options = normalizeOptions({ rootDir: '.', env: 'node', vitest: true });
+    await expect(
+      vitest(options, { importModule: notInstalled('@vitest/eslint-plugin') }),
+    ).rejects.toThrow(
+      'createConfig: vitest requires "@vitest/eslint-plugin". Install it: npm i -D @vitest/eslint-plugin',
+    );
+  });
+
+  it('loads an installed peer and explains a missing one with the real resolver', async () => {
+    expect(await importPeer('globals', 'unused')).toHaveProperty('node');
+    await expect(importPeer('@devenvy/no-such-peer', 'install it')).rejects.toThrow(/^install it$/);
+  });
+
+  it('never loads optional peers for features that are off', async () => {
+    const options = normalizeOptions({ rootDir: '.', env: 'browser', typescript: false });
+    const importModule = () => Promise.reject(new Error('should not import'));
+    expect(await typescript(options, { importModule })).toEqual([]);
+    expect(await vitest(options, { importModule })).toEqual([]);
+    expect(await angular(options, { importModule })).toEqual([]);
   });
 
   it('rejects an empty vitest files list', async () => {

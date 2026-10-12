@@ -96,6 +96,14 @@ export function managedJson(choices) {
 }
 
 /**
+ * pnpm (11+) fails an install while a dependency's build script is undecided. These come with
+ * our dependencies: unrs-resolver (import-x's resolver) installs its prebuilt binary as an
+ * optional dependency, and its postinstall only checks for it.
+ * @type {Record<string, boolean>}
+ */
+export const PNPM_BUILDS = { 'unrs-resolver': false };
+
+/**
  * @param {Choices} choices
  * @returns {string}
  */
@@ -106,13 +114,11 @@ export function prettierConfigFor(choices) {
 }
 
 /**
+ * The packaged tsconfig base for a TypeScript project.
  * @param {Choices} choices
- * @returns {'angular' | 'node' | 'browser' | 'js'}
+ * @returns {'angular' | 'node' | 'browser'}
  */
 export function tsconfigBaseFor(choices) {
-  if (!choices.typescript) {
-    return 'js';
-  }
   if (choices.angular) {
     return 'angular';
   }
