@@ -1,5 +1,6 @@
 import { JS_FILES, TS_FILES } from '../files.mjs';
 import { importPeer } from '../peer.mjs';
+import { installedPluginRules } from '../rules/installed.mjs';
 import { coreRelaxations, typescriptTestRelaxations } from '../rules/test-relaxations.mjs';
 import vitestRules from '../rules/vitest.mjs';
 
@@ -7,16 +8,16 @@ const MISSING_VITEST_PLUGIN =
   'createConfig: vitest requires "@vitest/eslint-plugin". Install it: npm i -D @vitest/eslint-plugin';
 
 /**
- * Enabled vitest rules that need type information; turned off where there is none.
+ * Vitest rules that need type information; turned off where there is none.
  * @param {any} vitestPlugin
+ * @param {import('eslint').Linter.RulesRecord} rules the enabled rules
  * @returns {string[]}
  */
-function typedVitestRules(vitestPlugin) {
+function typedVitestRules(vitestPlugin, rules) {
   return Object.entries(vitestPlugin.rules)
     .filter(
       ([name, rule]) =>
-        `vitest/${name}` in vitestRules &&
-        /** @type {any} */ (rule).meta?.docs?.requiresTypeChecking,
+        `vitest/${name}` in rules && /** @type {any} */ (rule).meta?.docs?.requiresTypeChecking,
     )
     .map(([name]) => `vitest/${name}`);
 }
@@ -36,6 +37,7 @@ export async function vitest(options, deps = {}) {
     deps.importModule,
   );
   const { files } = options.vitest;
+  const rules = installedPluginRules(vitestRules, vitestPlugin.rules, 'vitest/');
   /** @type {import('eslint').Linter.Config[]} */
   const configs = [
     {
@@ -43,7 +45,7 @@ export async function vitest(options, deps = {}) {
       files,
       plugins: { vitest: vitestPlugin },
       languageOptions: { globals: vitestPlugin.environments.env.globals },
-      rules: { ...vitestRules, ...coreRelaxations },
+      rules: { ...rules, ...coreRelaxations },
     },
   ];
   if (options.typescript) {
@@ -58,7 +60,7 @@ export async function vitest(options, deps = {}) {
     name: 'devenvy/vitest/untyped',
     files,
     ignores: options.typescript ? TS_FILES : [],
-    rules: Object.fromEntries(typedVitestRules(vitestPlugin).map((rule) => [rule, 'off'])),
+    rules: Object.fromEntries(typedVitestRules(vitestPlugin, rules).map((rule) => [rule, 'off'])),
   });
   return configs;
 }

@@ -1,6 +1,6 @@
 # @devenvy/code-guidelines
 
-Shared lint, format, TypeScript, editor and CI baseline for DevEnvy JavaScript, TypeScript and
+Shared lint, format, TypeScript, editor and git baseline for DevEnvy JavaScript, TypeScript and
 Angular repositories. The ECMAScript sibling of
 [code-guidelines-dotnet](https://github.com/devenvy/code-guidelines-dotnet).
 
@@ -8,7 +8,8 @@ Angular repositories. The ECMAScript sibling of
   angular-eslint (TypeScript + templates) and Vitest, with every rule explicitly decided.
 - **Prettier** — formatting for everything; ESLint never fights it.
 - **tsconfig bases** — strict compiler settings for Node, browser, Angular and plain JavaScript.
-- **CLI** — `init` sets a repo up, `check` fails CI on drift, `sync` updates managed files.
+- **CLI** — `init` sets a repo up, `check` fails CI on drift or a weakened config, `sync` updates
+  managed files.
 
 ## Quick start
 
@@ -52,15 +53,15 @@ so enabling Vitest brings `typescript` in as a dependency of that plugin (nothin
 
 `init` writes:
 
-| File                                                 | What                                                                                                                                                                                          |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `eslint.config.mjs`                                  | `createConfig({...})` with your choices (created if absent)                                                                                                                                   |
-| `tsconfig.json`                                      | TypeScript projects: extends `@devenvy/code-guidelines/tsconfig/<base>.json`; an existing one is migrated and options the base already sets are removed                                       |
-| `package.json`                                       | `"prettier"` key, scripts (`lint`, `format`, `format:check`, `typecheck` for TypeScript, `knip`, `guidelines:check`, `test:ci` with `--vitest`) and a `codeGuidelines` record of your choices |
-| `.nvmrc`                                             | `24` (created if absent)                                                                                                                                                                      |
-| `.editorconfig`, `.gitattributes`, `.prettierignore` | a managed block; your own content outside it is kept                                                                                                                                          |
-| `.vscode/extensions.json`, `.vscode/settings.json`   | recommended extensions and format/fix-on-save keys merged in; your other settings are kept                                                                                                    |
-| `pnpm-workspace.yaml`                                | pnpm projects: `allowBuilds` decision for `unrs-resolver` if missing; your other settings are kept                                                                                            |
+| File                                                               | What                                                                                                                                                                                          |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `eslint.config.mjs`                                                | `createConfig({...})` with your choices (created if absent)                                                                                                                                   |
+| `tsconfig.json`                                                    | TypeScript projects: extends `@devenvy/code-guidelines/tsconfig/<base>.json`; an existing one is migrated and options the base already sets are removed                                       |
+| `package.json`                                                     | `"prettier"` key, scripts (`lint`, `format`, `format:check`, `typecheck` for TypeScript, `knip`, `guidelines:check`, `test:ci` with `--vitest`) and a `codeGuidelines` record of your choices |
+| `.nvmrc`                                                           | `24` (created if absent)                                                                                                                                                                      |
+| `.editorconfig`, `.gitattributes`, `.gitignore`, `.prettierignore` | a managed block; your own content outside it is kept                                                                                                                                          |
+| `.vscode/extensions.json`, `.vscode/settings.json`                 | recommended extensions and format/fix-on-save keys merged in; your other settings are kept                                                                                                    |
+| `pnpm-workspace.yaml`                                              | pnpm projects: `allowBuilds` decision for `unrs-resolver` if missing; your other settings are kept                                                                                            |
 
 Existing `eslint.config.*`, `.eslintrc*`, `.prettierrc*` or `prettier.config.*` files stop `init`
 before it writes anything. Re-run with `--force` to replace them.
@@ -79,7 +80,7 @@ export default createConfig(
     angular: { prefix: 'app' },
   },
   // any extra flat configs are appended last
-  { files: ['scripts/**'], rules: { 'no-console': 'off' } },
+  { files: ['scripts/**'], rules: { 'no-warning-comments': 'error' } },
 );
 ```
 
@@ -99,22 +100,22 @@ export default createConfig(
 Every block is named `devenvy/<layer>/<part>`; use `npx eslint --inspect-config` to see exactly
 what applies to a file.
 
-### Overriding rules
+### Adding and relaxing rules
 
-Append a config object. Prefer scoping it to the files that need it:
+Appended configs may turn on rules the shared config leaves off, or raise a severity.
+`code-guidelines check` fails on anything weaker than the shared config (see [CLI](#cli)), so a
+rule is relaxed only where it is visible in review:
 
-```js
-export default createConfig(
-  { rootDir: import.meta.dirname, env: 'node' },
-  { files: ['src/legacy/**'], rules: { '@typescript-eslint/no-explicit-any': 'off' } },
-);
-```
+- one line: `// eslint-disable-next-line <rule> -- <reason>` (unused disables are errors);
+- generated or vendored files: the `ignores` option;
+- TypeScript files outside every tsconfig: the `untypedFiles` option.
 
 ### What is enforced
 
 The rule tables in [`src/eslint/rules`](src/eslint/rules) are the effective configuration:
-every rule each plugin ships is listed with its severity, and surprising `off`s carry a reason.
-Highlights:
+every rule each plugin ships is listed with its severity, and surprising `off`s carry a reason. A
+rule a newer plugin version adds stays off in your project until a release of this package decides
+it. Highlights:
 
 - Promise safety (`no-floating-promises`, `no-misused-promises`, `await-thenable`), the
   `no-unsafe-*` family, `no-explicit-any`, `no-unnecessary-condition`, `no-deprecated`.
@@ -126,8 +127,8 @@ Highlights:
 - Imports ordered builtin → external → internal → relative → type, alphabetized; no import cycles
   (`import-x/no-cycle`, using the TypeScript resolver).
 
-Only these layers turn table rules off, and tests assert it: `no-undef` for TS files, untyped files,
-test-file relaxations, and `eslint-config-prettier` (with `curly` re-enabled).
+Only these layers turn rules off: `no-undef` for TS files, untyped files, test-file relaxations,
+and `eslint-config-prettier` (with `curly` re-enabled).
 
 ## Prettier
 
@@ -166,11 +167,21 @@ code-guidelines sync --dry-run   # show what sync would change
 code-guidelines sync             # rewrite managed blocks and keys from the installed version
 ```
 
-`check` also verifies that `eslint.config.*` uses `createConfig`, that `package.json#prettier`
-points at this package, that `tsconfig.json` extends a packaged base, that no stray Prettier or
-second ESLint config exists, that the scripts CI runs exist, and that the repo follows the
-[CI and releases](#ci-and-releases) convention. A repo outside that convention sets
-`"codeGuidelines": { "workflows": false }`.
+Besides the managed blocks and keys, `check` compares what is actually enforced with this package:
+
+- **ESLint**: for every `.js`/`.mjs`/`.cjs`/`.ts`/`.mts`/`.cts`/`.html` file, the project's resolved
+  config (`eslint.config.*`, as ESLint loads it) against `createConfig` with the project's own
+  options. A file the shared config lints must not be ignored, every rule it turns on must stay
+  on at the same or a higher severity with the same options, and its parser, processor and linter
+  options must not be replaced. The options must match the `codeGuidelines` choices.
+- **TypeScript**: every `tsconfig*.json` must extend a packaged base (directly or through other
+  tsconfigs, relative or from a package), and none may turn off a check the base turns on
+  (`strict` and each flag it implies, `noUncheckedIndexedAccess`, …, and Angular's
+  `strictTemplates` family).
+- **Prettier**: `package.json#prettier` points at this package and no other Prettier config exists.
+
+What it does not cover: `eslint-disable` comments (each is visible where it is used, and unused
+ones fail lint), and whether CI actually runs these scripts.
 
 To change a choice later, edit `codeGuidelines` in `package.json` (it selects managed content, such
 as the Angular VS Code extension) and `eslint.config.mjs` (it selects lint behaviour), then run
@@ -184,12 +195,12 @@ no `root` line exists.
 
 ## CI and releases
 
-Each repo owns its workflows (no shared/reusable workflows). The DevEnvy convention, with
-[storm-watch](https://github.com/devenvy/storm-watch) as the reference setup, is checked by
-`code-guidelines check`:
+Each repo owns its workflows (no shared/reusable workflows). The DevEnvy CI convention, with
+[storm-watch](https://github.com/devenvy/storm-watch) as the reference setup, is described here and
+not checked: workflows differ per repo, and a static check cannot tell a job that works from one
+that does nothing.
 
 - **`ci.yml`** (pull requests and a weekly run), one job each:
-  - `pr-title`: the PR title is a conventional commit.
   - `lint`: `guidelines:check`, `lint`, `format:check`, `typecheck` (TypeScript projects),
     `knip` (unused files, exports and dependencies), [actionlint](https://github.com/rhysd/actionlint) and
     [zizmor](https://docs.zizmor.sh) (GitHub Actions security).
@@ -200,35 +211,32 @@ Each repo owns its workflows (no shared/reusable workflows). The DevEnvy convent
     allow-list.
   - `dependabot-auto-merge`, and `result`, which needs every other job and is the single
     required status check.
-- **`release.yml`** (push to `main`): release-please keeps a release PR current and enables
-  auto-merge on it; when it merges, the same run builds and publishes (npm package, release assets,
-  container image) with build provenance attestations and an SPDX SBOM (`pnpm sbom`).
 - **`scorecard.yml`**: [OpenSSF Scorecard](https://scorecard.dev) on pushes to `main` and weekly.
   Its own workflow because publishing results restricts what else the workflow may contain.
-- **`.github/dependabot.yml`** with a 7-day cooldown, and release-please's
-  `release-please-config.json` / `.release-please-manifest.json`.
-- PR titles are conventional commits (`feat:`, `fix:`, `feat!:`, `chore:` …): squash merges use the
-  title as the commit message, and release-please reads those.
-- Bot actions (release PRs, auto-merge) run as the devenvy-bot GitHub App — org variable
+- **`.github/dependabot.yml`** with a 7-day cooldown.
+- Bot actions (Dependabot auto-merge) run as the devenvy-bot GitHub App — org variable
   `DEVENVY_BOT_CLIENT_ID`, org secret `DEVENVY_BOT_PRIVATE_KEY`, both also as Dependabot secrets —
-  so they trigger other workflows, which `GITHUB_TOKEN` actions do not. Each token requests only
-  the permissions its step needs.
+  so the merges trigger workflows on `main`, which `GITHUB_TOKEN` merges do not. Each token
+  requests only the permissions its step needs.
+
+How a repo publishes is its own choice. The two styles in use, both running CI
+first and attesting what they publish (build provenance, SPDX SBOM via `pnpm sbom`):
+
+- **Latest from `main`** (apps, e.g. storm-watch): every push to `main` deploys the site and pushes
+  the container image as `latest` and `sha-<commit>`. Merges in quick succession queue up, so only
+  the newest `main` deploys after the one in progress. Versioned releases are optional.
+- **Releases cut by hand** (npm packages, e.g. this one): publishing a GitHub release —
+  `gh release create v1.2.0 --target main --generate-notes`, or the Releases page — publishes that
+  version (the npm package with its version set from the tag, an image as `X.Y.Z` and `X.Y`,
+  release assets).
 
 Coverage needs Vitest's `json-summary` and `json` reporters; set thresholds in the test config so
 the test run itself fails when coverage drops.
 
-## Repository settings
+## Changes
 
-[`scripts/repo-settings`](scripts/repo-settings) checks or applies the GitHub baseline — squash-only
-merges with PR titles, branch cleanup, secret scanning with push protection, Dependabot alerts and
-security updates, CodeQL default setup with the extended suite, GitHub Code Quality, read-only
-workflow tokens, HTTPS for Pages, and a `main` ruleset requiring the `result` check and blocking
-merges on any CodeQL or Code Quality finding:
-
-```sh
-node scripts/repo-settings/repo-settings.mjs check devenvy/storm-watch
-node scripts/repo-settings/repo-settings.mjs apply devenvy/storm-watch
-```
+What changed in each version is in the
+[release notes](https://github.com/devenvy/code-guidelines-ecma/releases).
 
 ## License
 

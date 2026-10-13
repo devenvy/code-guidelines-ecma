@@ -5,7 +5,7 @@ import { javascript } from './layers/javascript.mjs';
 import { prettier } from './layers/prettier.mjs';
 import { typescript } from './layers/typescript.mjs';
 import { vitest } from './layers/vitest.mjs';
-import { normalizeOptions } from './options.mjs';
+import { normalizeOptions, OPTIONS_SETTING } from './options.mjs';
 
 export { angular, ignores, imports, javascript, normalizeOptions, prettier, typescript, vitest };
 
@@ -34,6 +34,8 @@ export async function createConfig(options, ...overrides) {
     ...(await angular(normalized)),
     ...(await vitest(normalized)),
     ...prettier(),
+    // lets `code-guidelines check` rebuild this baseline and compare the consumer's config to it
+    { name: 'devenvy/options', settings: { [OPTIONS_SETTING]: options } },
     ...overrides.flat(),
   ];
 }

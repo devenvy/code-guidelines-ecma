@@ -1,5 +1,8 @@
+import { builtinRules } from 'eslint/use-at-your-own-risk';
+
 import { ROOT_CONFIG_FILES, TS_FILES } from '../files.mjs';
 import { importPeer } from '../peer.mjs';
+import { installedRules } from '../rules/installed.mjs';
 import { typescriptRelaxations } from '../rules/test-relaxations.mjs';
 import typescriptRules from '../rules/typescript.mjs';
 
@@ -24,6 +27,10 @@ export async function typescript(options, deps = {}) {
   const disableTypeChecked = /** @type {import('eslint').Linter.Config} */ (
     tseslint.configs.disableTypeChecked
   );
+  const available = new Set([
+    ...Object.keys(tseslint.plugin.rules ?? {}).map((name) => `@typescript-eslint/${name}`),
+    ...builtinRules.keys(),
+  ]);
   return [
     {
       name: 'devenvy/typescript/rules',
@@ -33,7 +40,7 @@ export async function typescript(options, deps = {}) {
         parser: tseslint.parser,
         parserOptions: { projectService: true, tsconfigRootDir: options.rootDir },
       },
-      rules: typescriptRules,
+      rules: installedRules(typescriptRules, available),
     },
     {
       // root tool configs and declared untyped files need not belong to a tsconfig

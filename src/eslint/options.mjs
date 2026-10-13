@@ -1,5 +1,8 @@
 import { DEFAULT_TEST_FILES } from './files.mjs';
 
+/** ESLint `settings` key holding the options `createConfig` was called with. */
+export const OPTIONS_SETTING = 'devenvy/options';
+
 /**
  * @typedef {object} AngularOptions
  * @property {string | string[]} prefix Component/directive selector prefix(es).

@@ -1,10 +1,10 @@
 import {
-  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -18,16 +18,18 @@ import { BLOCK_START } from '../src/cli/lib/blocks.mjs';
 /** @type {string[]} */
 const dirs = [];
 
-/** Workflow files that satisfy the CI convention check. */
-const WORKFLOWS = path.join(import.meta.dirname, 'fixtures/workflows');
+/** This package, linked into each project for the eslint.config.mjs that check loads. */
+const PACKAGE = path.resolve(import.meta.dirname, '..');
 
-/** Creates a temp project with the convention's workflow files and the given files. */
+/** Creates a temp project with the given files. */
 function project(files = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'cg-cli-'));
   dirs.push(dir);
   // a repository root: lockfile detection never looks above it
   mkdirSync(path.join(dir, '.git'));
-  cpSync(WORKFLOWS, dir, { recursive: true });
+  // only the package: peers stay missing for init (they resolve from the package's real path)
+  mkdirSync(path.join(dir, 'node_modules/@devenvy'), { recursive: true });
+  symlinkSync(PACKAGE, path.join(dir, 'node_modules/@devenvy/code-guidelines'), 'junction');
   const all = {
     'package.json': '{\n  "name": "demo",\n  "scripts": {\n    "build": "x"\n  }\n}\n',
     ...files,
@@ -91,7 +93,7 @@ describe('init', () => {
   });
 
   it('sets up an angular project with the angular prettier config', async () => {
-    const dir = project({ 'tsconfig.spec.json': '{}' });
+    const dir = project({ 'tsconfig.spec.json': '{ "extends": "./tsconfig.json" }' });
     const result = await cli(dir, 'init', '--angular', '--prefix', 'sw');
     expect(result.code).toBe(0);
     expect(result.output.at(-1)).toBe(
@@ -199,7 +201,6 @@ describe('init', () => {
     const root = project({ 'pnpm-lock.yaml': '', 'pnpm-workspace.yaml': "packages: ['apps/*']\n" });
     const dir = path.join(root, 'apps/web');
     mkdirSync(dir, { recursive: true });
-    cpSync(WORKFLOWS, dir, { recursive: true });
     writeFileSync(path.join(dir, 'package.json'), '{ "name": "web" }\n');
     const result = await cli(dir, 'init', '--env', 'node');
     expect(result.output).toContain('updated ../../pnpm-workspace.yaml');
@@ -216,7 +217,6 @@ describe('init', () => {
     const root = project({ 'pnpm-lock.yaml': '', 'pnpm-workspace.yaml': "packages: ['apps/*']\n" });
     const dir = path.join(root, 'apps/web');
     mkdirSync(dir, { recursive: true });
-    cpSync(WORKFLOWS, dir, { recursive: true });
     writeFileSync(path.join(dir, 'package.json'), '{ "name": "web" }\n');
     writeFileSync(path.join(dir, 'pnpm-lock.yaml'), '');
     expect((await cli(dir, 'init', '--env', 'node')).output).toContain(
@@ -231,7 +231,6 @@ describe('init', () => {
     writeFileSync(path.join(home, 'pnpm-lock.yaml'), '');
     const dir = path.join(home, 'proj');
     mkdirSync(dir);
-    cpSync(WORKFLOWS, dir, { recursive: true });
     writeFileSync(path.join(dir, 'package.json'), '{ "name": "proj" }\n');
     const result = await cli(dir, 'init', '--env', 'node');
     expect(result.output.at(-1)).toMatch(/^Install missing peers: npm i -D /);
@@ -453,7 +452,9 @@ describe('check', () => {
     const pkg = json(dir, 'package.json');
     pkg.codeGuidelines.angular = true;
     writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
-    expect((await cli(dir, 'check')).output.join('\n')).toContain('codeGuidelines.angular is true');
+    expect((await cli(dir, 'check')).output).toContain(
+      'eslint.config.mjs: package.json codeGuidelines.angular is true but createConfig has false',
+    );
   });
 
   it('explains when init has not run', async () => {
@@ -488,109 +489,152 @@ describe('check', () => {
   });
 });
 
-describe('check: CI convention', () => {
-  const CI = '.github/workflows/ci.yml';
+describe('check: ESLint config', () => {
+  const CONFIG = 'eslint.config.mjs';
+  const OPTIONS = "{ rootDir: import.meta.dirname, env: 'node' }";
 
-  /** An initialised node project with Vitest. */
-  async function initialised() {
-    const dir = project();
-    await cli(dir, 'init', '--env', 'node', '--vitest');
+  /** A node project (as init --env node sets it up) whose createConfig call gets `args`. */
+  async function withConfig(/** @type {string} */ args, files = {}) {
+    const dir = project(files);
+    await cli(dir, 'init', '--env', 'node');
+    writeFileSync(
+      path.join(dir, CONFIG),
+      `import { createConfig } from '@devenvy/code-guidelines/eslint';\n\nexport default createConfig(${args});\n`,
+    );
     return dir;
   }
 
-  /** Problems check reports, one per line. */
-  async function problems(dir) {
-    return (await cli(dir, 'check')).output;
+  it('accepts overrides that only add or tighten rules', async () => {
+    const dir = await withConfig(
+      `${OPTIONS}, { rules: { 'no-console': 'error', 'no-warning-comments': 'warn' } }`,
+    );
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+
+  it('accepts files excluded through the ignores option', async () => {
+    const dir = await withConfig(
+      "{ rootDir: import.meta.dirname, env: 'node', ignores: ['generated/**'] }",
+      { 'generated/a.js': 'x\n' },
+    );
+    expect((await cli(dir, 'check')).code).toBe(0);
+  });
+
+  it('reports a rule turned down or reconfigured, naming the files', async () => {
+    const dir = await withConfig(
+      `${OPTIONS}, { files: ['src/**'], rules: { eqeqeq: 'warn', curly: ['error', 'multi'] } }`,
+      { 'src/a.js': '', 'src/b.ts': '', 'src/c.mjs': '', 'src/d.cjs': '', 'other.js': '' },
+    );
+    const { code, output } = await cli(dir, 'check');
+    expect(code).toBe(1);
+    expect(output).toContain(
+      `${CONFIG}: turns down "eqeqeq" (error → warn) (src/a.js, src/b.ts, src/c.mjs and 1 more)`,
+    );
+    expect(output).toContain(
+      `${CONFIG}: changes the options of "curly" (src/a.js, src/b.ts, src/c.mjs and 1 more)`,
+    );
+  });
+
+  it('reports files ignored outside the ignores option', async () => {
+    const dir = await withConfig(`${OPTIONS}, { ignores: ['src/**'] }`, { 'src/a.ts': '' });
+    expect((await cli(dir, 'check')).output).toContain(
+      `${CONFIG}: ignores files the shared config lints (src/a.ts)`,
+    );
+  });
+
+  it('reports changed linter options and a replaced parser', async () => {
+    const dir = await withConfig(
+      `${OPTIONS}, { linterOptions: { reportUnusedDisableDirectives: 'off' } }, { files: ['**/*.ts'], languageOptions: { parser: { parse: () => ({}) } } }`,
+      { 'src/a.ts': '' },
+    );
+    const { output } = await cli(dir, 'check');
+    expect(output).toContain(`${CONFIG}: changes linterOptions (eslint.config.mjs, src/a.ts)`);
+    expect(output).toContain(`${CONFIG}: replaces the shared config's parser (src/a.ts)`);
+  });
+
+  it('reports a config that cannot be loaded', async () => {
+    const dir = await withConfig(OPTIONS);
+    writeFileSync(path.join(dir, CONFIG), "throw new Error('boom');\n");
+    expect((await cli(dir, 'check')).output[0]).toMatch(
+      /^eslint\.config\.mjs: could not be loaded: .*boom/,
+    );
+  });
+
+  it('reports every choice that differs from the createConfig options', async () => {
+    const dir = await withConfig("{ rootDir: import.meta.dirname, env: 'browser', vitest: true }");
+    const { output } = await cli(dir, 'check');
+    expect(output).toContain(
+      `${CONFIG}: package.json codeGuidelines.env is "node" but createConfig has "browser"`,
+    );
+    expect(output).toContain(
+      `${CONFIG}: package.json codeGuidelines.vitest is false but createConfig has true`,
+    );
+  });
+});
+
+describe('check: tsconfig', () => {
+  async function initialised(/** @type {string[]} */ ...args) {
+    const dir = project();
+    await cli(dir, 'init', ...args);
+    return dir;
   }
 
-  it('reports every missing workflow and release file', async () => {
-    const dir = await initialised();
-    rmSync(path.join(dir, '.github'), { recursive: true });
-    rmSync(path.join(dir, 'release-please-config.json'));
-    rmSync(path.join(dir, '.release-please-manifest.json'));
-    expect(await problems(dir)).toEqual(
+  const write = (/** @type {string} */ dir, /** @type {string} */ name, value) =>
+    writeFileSync(path.join(dir, name), JSON.stringify(value));
+
+  it('reports checks turned off anywhere in the extends chain', async () => {
+    const dir = await initialised('--env', 'node');
+    write(dir, 'tsconfig.app.json', {
+      extends: './tsconfig.json',
+      compilerOptions: { strictNullChecks: false, noUncheckedIndexedAccess: false },
+    });
+    expect((await cli(dir, 'check')).output).toEqual(
       expect.arrayContaining([
-        `${CI}: missing`,
-        '.github/workflows/release.yml: missing',
-        '.github/workflows/scorecard.yml: missing',
-        '.github/dependabot.yml: missing',
-        'release-please-config.json: missing',
-        '.release-please-manifest.json: missing',
+        'tsconfig.app.json: compilerOptions.strictNullChecks must not be false (the base sets strict)',
+        'tsconfig.app.json: compilerOptions.noUncheckedIndexedAccess must stay true (the base sets it)',
       ]),
     );
   });
 
-  it('reports jobs and steps that drift from the convention', async () => {
-    const dir = await initialised();
-    const ci = read(dir, CI)
-      .replace('types: [opened, synchronize, reopened, edited]', 'types: [opened]')
-      .replace('      - run: pnpm run knip\n', '')
-      .replace('      - uses: zizmorcore/zizmor-action@v0\n', '')
-      .replace('      - run: pnpm run test:ci\n', '      - run: pnpm test\n')
-      .replace('actions/dependency-review-action@v5', 'actions/checkout@v7')
-      .replace('  audit:\n    steps:\n      - run: pnpm audit --prod\n', '')
-      .replace('    if: always()\n', '')
-      .replace('  dependabot-auto-merge:', '  docker:\n    steps: []\n  dependabot-auto-merge:');
-    writeFileSync(path.join(dir, CI), ci);
-    expect(await problems(dir)).toEqual(
+  it('reports Angular template checks turned off', async () => {
+    const dir = await initialised('--angular', '--prefix', 'app');
+    write(dir, 'tsconfig.app.json', {
+      extends: './tsconfig.json',
+      angularCompilerOptions: { strictTemplates: false, strictInputTypes: false },
+    });
+    expect((await cli(dir, 'check')).output).toEqual(
       expect.arrayContaining([
-        `${CI}: pull_request types must include "edited" so a fixed PR title is checked again`,
-        `${CI}: missing job "audit"`,
-        `${CI}: job "result" must run with if: always()`,
-        `${CI}: job "result" must need every job; missing: docker`,
-        `${CI}: job "lint" must run the "knip" script`,
-        `${CI}: job "test" must run the "test:ci" script`,
-        `${CI}: job "lint" must run zizmor`,
-        `${CI}: job "dependency-review" must use actions/dependency-review-action`,
+        'tsconfig.app.json: angularCompilerOptions.strictTemplates must stay true (the base sets it)',
+        'tsconfig.app.json: angularCompilerOptions.strictInputTypes must not be false (the base sets strictTemplates)',
       ]),
     );
   });
 
-  it('requires a pull_request trigger, release-please and valid YAML', async () => {
-    const dir = await initialised();
-    writeFileSync(path.join(dir, CI), read(dir, CI).replace(/^on:\n.*\n.*\n/m, 'on: push\n'));
-    writeFileSync(path.join(dir, '.github/workflows/release.yml'), 'jobs: {}\n');
-    writeFileSync(path.join(dir, '.github/workflows/scorecard.yml'), 'jobs: [\n');
-    const output = await problems(dir);
+  it('requires every tsconfig to reach a packaged base', async () => {
+    const dir = await initialised('--env', 'node');
+    mkdirSync(path.join(dir, 'scripts'));
+    write(dir, 'scripts/tsconfig.json', { compilerOptions: { strict: true } });
+    write(dir, 'tsconfig.other.json', { extends: 'no-such-package/tsconfig.json' });
+    write(dir, 'tsconfig.loop.json', { extends: './tsconfig.loop.json' });
+    write(dir, 'tsconfig.gone.json', { extends: './missing' });
+    const { output } = await cli(dir, 'check');
     expect(output).toEqual(
       expect.arrayContaining([
-        `${CI}: must run on pull_request`,
-        '.github/workflows/release.yml: no step uses googleapis/release-please-action',
+        'scripts/tsconfig.json: does not extend @devenvy/code-guidelines/tsconfig/<base>.json',
+        'tsconfig.other.json: extends "no-such-package/tsconfig.json", which cannot be resolved',
+        'tsconfig.loop.json: extends nests too deep (a cycle?)',
+        'tsconfig.gone.json: extends "./missing", which does not exist',
       ]),
     );
-    expect(output.join('\n')).toContain('.github/workflows/scorecard.yml: invalid YAML');
   });
 
-  it('requires the scripts CI runs', async () => {
-    const dir = await initialised();
-    const pkg = json(dir, 'package.json');
-    delete pkg.scripts.knip;
-    writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
-    expect(await problems(dir)).toContain('package.json: missing script "knip" (CI runs it)');
-  });
-
-  it('requires typecheck in CI only for TypeScript projects', async () => {
-    const withoutTypecheck = (/** @type {string} */ dir) =>
-      writeFileSync(
-        path.join(dir, CI),
-        read(dir, CI).replace('      - run: pnpm run typecheck\n', ''),
-      );
-    const ts = await initialised();
-    withoutTypecheck(ts);
-    expect(await problems(ts)).toContain(`${CI}: job "lint" must run the "typecheck" script`);
-
-    const js = project();
-    await cli(js, 'init', '--env', 'browser', '--no-typescript');
-    withoutTypecheck(js);
-    expect((await cli(js, 'check')).code).toBe(0);
-  });
-
-  it('skips the workflow checks with codeGuidelines.workflows: false', async () => {
-    const dir = await initialised();
-    rmSync(path.join(dir, '.github'), { recursive: true });
-    const pkg = json(dir, 'package.json');
-    pkg.codeGuidelines.workflows = false;
-    writeFileSync(path.join(dir, 'package.json'), JSON.stringify(pkg));
+  it('resolves extends from installed packages', async () => {
+    const dir = await initialised('--env', 'node');
+    mkdirSync(path.join(dir, 'node_modules/shared'), { recursive: true });
+    write(dir, 'node_modules/shared/package.json', { name: 'shared' });
+    write(dir, 'node_modules/shared/tsconfig.json', {
+      extends: '@devenvy/code-guidelines/tsconfig/node.json',
+    });
+    write(dir, 'tsconfig.json', { extends: 'shared/tsconfig.json' });
     expect((await cli(dir, 'check')).code).toBe(0);
   });
 });

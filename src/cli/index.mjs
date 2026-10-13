@@ -65,7 +65,7 @@ export async function run(argv, cwd) {
         return { code: result.ok ? 0 : 1, output: result.output };
       }
       case 'check': {
-        const result = check(cwd);
+        const result = await check(cwd);
         return { code: result.ok ? 0 : 1, output: result.output };
       }
       case 'sync':

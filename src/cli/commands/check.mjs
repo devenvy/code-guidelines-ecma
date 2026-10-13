@@ -13,10 +13,8 @@ import { lineDiff, readText } from '../lib/text.mjs';
 import { undecidedBuilds } from '../lib/yaml.mjs';
 import { managedBlocks, managedJson, PNPM_BUILDS, prettierConfigFor } from '../managed.mjs';
 import { readChoices } from './choices.mjs';
-import { checkWorkflows, ciScripts } from './workflows.mjs';
-
-const TSCONFIG_PREFIX = '@devenvy/code-guidelines/tsconfig/';
-const MAX_EXTENDS_DEPTH = 10;
+import { checkEslintStrictness } from './eslint-strictness.mjs';
+import { checkTsconfigStrictness } from './tsconfig-strictness.mjs';
 
 /**
  * @typedef {{ file: string, message: string }} Problem
@@ -25,20 +23,18 @@ const MAX_EXTENDS_DEPTH = 10;
 /**
  * `code-guidelines check` — read-only.
  * @param {string} dir
- * @returns {{ ok: boolean, problems: Problem[], output: string[] }}
+ * @returns {Promise<{ ok: boolean, problems: Problem[], output: string[] }>}
  */
-export function check(dir) {
+export async function check(dir) {
   const choices = readChoices(dir);
   /** @type {Problem[]} */
   const problems = [
     ...checkBlocks(dir),
     ...checkJson(dir, choices),
     ...checkPnpmBuilds(dir),
-    ...checkEslint(dir, choices),
+    ...(await checkEslint(dir, choices)),
     ...checkPrettier(dir, choices),
-    ...(choices.typescript ? checkTsconfig(dir) : []),
-    ...checkScripts(dir, choices),
-    ...(choices.workflows === false ? [] : checkWorkflows(dir, choices)),
+    ...(choices.typescript ? checkTsconfigStrictness(dir) : []),
   ];
   const output =
     problems.length === 0
@@ -115,9 +111,9 @@ function checkPnpmBuilds(dir) {
 /**
  * @param {string} dir
  * @param {import('../managed.mjs').Choices} choices
- * @returns {Problem[]}
+ * @returns {Promise<Problem[]>}
  */
-function checkEslint(dir, choices) {
+async function checkEslint(dir, choices) {
   const configs = findFiles(dir, ESLINT_CONFIG_FILES);
   const legacy = findFiles(dir, LEGACY_ESLINT_FILES);
   /** @type {Problem[]} */
@@ -132,21 +128,7 @@ function checkEslint(dir, choices) {
       message: 'more than one ESLint config; ESLint uses only the first',
     });
   }
-  const { text } = readText(path.join(dir, config));
-  if (!text.includes('@devenvy/code-guidelines/eslint')) {
-    problems.push({
-      file: config,
-      message: 'does not use createConfig from @devenvy/code-guidelines/eslint',
-    });
-  }
-  const mentionsAngular = /\bangular\s*:/.test(text);
-  if (mentionsAngular !== choices.angular) {
-    problems.push({
-      file: config,
-      message: `package.json codeGuidelines.angular is ${choices.angular} but the ESLint config ${mentionsAngular ? 'enables' : 'does not enable'} angular`,
-    });
-  }
-  return problems;
+  return [...problems, ...(await checkEslintStrictness(dir, config, choices))];
 }
 
 /**
@@ -169,47 +151,4 @@ function checkPrettier(dir, choices) {
     });
   }
   return problems;
-}
-
-/**
- * @param {string} dir
- * @param {import('../managed.mjs').Choices} choices
- * @returns {Problem[]}
- */
-function checkScripts(dir, choices) {
-  const scripts = parseJsonc(readText(path.join(dir, 'package.json')).text, 'package.json').scripts;
-  return ciScripts(choices)
-    .filter((name) => typeof scripts?.[name] !== 'string')
-    .map((name) => ({ file: 'package.json', message: `missing script "${name}" (CI runs it)` }));
-}
-
-/**
- * Follows relative `extends` from tsconfig.json until a packaged base is found.
- * @param {string} dir
- * @returns {Problem[]}
- */
-function checkTsconfig(dir) {
-  let file = path.join(dir, 'tsconfig.json');
-  for (let depth = 0; depth < MAX_EXTENDS_DEPTH; depth += 1) {
-    const { exists, text } = readText(file);
-    if (!exists) {
-      return [{ file: path.relative(dir, file) || 'tsconfig.json', message: 'missing' }];
-    }
-    const raw = parseJsonc(text, path.relative(dir, file)).extends;
-    const extendsList = (Array.isArray(raw) ? raw : [raw]).filter(
-      (value) => typeof value === 'string',
-    );
-    if (extendsList.some((value) => value.startsWith(TSCONFIG_PREFIX))) {
-      return [];
-    }
-    const relative = extendsList.find((value) => value.startsWith('.'));
-    if (!relative) {
-      break;
-    }
-    file = path.resolve(
-      path.dirname(file),
-      relative.endsWith('.json') ? relative : `${relative}.json`,
-    );
-  }
-  return [{ file: 'tsconfig.json', message: `does not extend ${TSCONFIG_PREFIX}<base>.json` }];
 }

@@ -1,6 +1,6 @@
 {
   "name": "@devenvy/code-guidelines",
-  "version": "2.0.0",
+  "version": "0.0.0",
   "description": "DevEnvy code guidelines for JavaScript, TypeScript and Angular: ESLint, Prettier, tsconfig bases and a repo baseline CLI.",
   "license": "MIT",
   "author": "DevEnvy",
@@ -65,7 +65,8 @@
     "build:types": "tsc -p tsconfig.build.json",
     "check:package": "pnpm run build:types && publint --strict --pack pnpm && attw --pack . --profile esm-only",
     "prepack": "pnpm run build:types",
-    "guidelines:check": "code-guidelines check"
+    "guidelines:check": "code-guidelines check",
+    "rules:add": "node scripts/rules-add.mjs"
   },
   "peerDependencies": {
     "@vitest/eslint-plugin": "^1.6.27",

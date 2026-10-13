@@ -11,7 +11,6 @@ const templatesDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
  * @property {boolean} typescript
  * @property {boolean} angular
  * @property {boolean} vitest
- * @property {boolean} [workflows] check the CI/release workflow convention (default true)
  */
 
 /**
@@ -50,6 +49,12 @@ export function managedBlocks() {
     {
       file: '.gitattributes',
       content: template('gitattributes'),
+      placement: { position: 'start' },
+    },
+    {
+      file: '.gitignore',
+      content: template('gitignore'),
+      // first, so the project's own patterns after the block (including ! re-includes) win
       placement: { position: 'start' },
     },
     {

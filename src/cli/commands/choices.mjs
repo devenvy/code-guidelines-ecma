@@ -25,6 +25,5 @@ export function readChoices(dir) {
     typescript: recorded.typescript !== false,
     angular: recorded.angular === true,
     vitest: recorded.vitest === true,
-    workflows: recorded.workflows !== false,
   };
 }
