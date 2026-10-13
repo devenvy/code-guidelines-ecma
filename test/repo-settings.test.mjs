@@ -179,9 +179,13 @@ describe('repo settings against the API', () => {
   it('apply updates an existing ruleset and pages, then reports success', () => {
     const routes = compliantRoutes();
     routes['repos/o/r'] = { ...routes['repos/o/r'], delete_branch_on_merge: false };
+    routes['repos/o/r/pages'] = { https_enforced: false };
     const { api, writes } = fakeApi(routes, (method, endpoint, body) => {
       if (method === 'PATCH' && endpoint === 'repos/o/r') {
         routes['repos/o/r'] = { ...routes['repos/o/r'], ...body };
+      }
+      if (method === 'PUT' && endpoint === 'repos/o/r/pages') {
+        routes['repos/o/r/pages'] = body;
       }
     });
     const result = run(['apply', 'o/r'], api);
@@ -189,6 +193,14 @@ describe('repo settings against the API', () => {
     expect(calls(writes)).toContain('PUT repos/o/r/pages');
     expect(result.code).toBe(0);
     expect(result.output.at(-1)).toBe('Applied.');
+  });
+
+  it('apply leaves Pages alone when HTTPS is already enforced', () => {
+    const routes = compliantRoutes();
+    routes['repos/o/r'] = { ...routes['repos/o/r'], allow_auto_merge: false };
+    const { api, writes } = fakeApi(routes);
+    apply('o/r', baseline, readCurrent('o/r', 'main', api), api);
+    expect(calls(writes)).not.toContain('PUT repos/o/r/pages');
   });
 
   it('apply reports settings that did not take effect', () => {

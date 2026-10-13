@@ -269,7 +269,11 @@ export function apply(repo, baseline, current, api = gh) {
     ['-X', 'PUT', `repos/${repo}/actions/permissions/workflow`],
     baseline.actionsWorkflowPermissions,
   );
-  if (current.pagesHttpsEnforced !== null) {
+  // only when it differs: the PUT fails on a site without a certificate, e.g. a *.github.io one
+  if (
+    current.pagesHttpsEnforced !== null &&
+    current.pagesHttpsEnforced !== baseline.pagesHttpsEnforced
+  ) {
     api(['-X', 'PUT', `repos/${repo}/pages`], { https_enforced: baseline.pagesHttpsEnforced });
   }
   if (current.ruleset) {
