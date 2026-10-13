@@ -1,12 +1,14 @@
 /*
- * Snapshots the resolved rules for representative files, so any change to what is enforced —
- * from a table edit or a plugin upgrade — shows up as a reviewable snapshot diff.
+ * Snapshots the resolved severity of every tabled rule for representative files, so a table or
+ * layer change shows up as a reviewable snapshot diff. Options and undecided rules are left out:
+ * they change with plugin upgrades, which must pass without a snapshot update.
  */
 import path from 'node:path';
 
 import { ESLint } from 'eslint';
 import { describe, expect, it } from 'vitest';
 
+import { TABLED_RULES } from './tabled-rules.mjs';
 import { createConfig } from '../src/eslint/index.mjs';
 
 const fixtures = path.resolve(import.meta.dirname, 'fixtures');
@@ -26,10 +28,8 @@ async function effectiveRules(fixture, options, file) {
   const config = await eslint.calculateConfigForFile(path.join(cwd, file));
   return Object.fromEntries(
     Object.entries(config.rules ?? {})
-      .map(([rule, [severity, ...rest]]) => [
-        rule,
-        rest.length > 0 ? [severity, ...rest] : severity,
-      ])
+      .filter(([rule]) => TABLED_RULES.has(rule))
+      .map(([rule, [severity]]) => [rule, severity])
       .sort(([a], [b]) => String(a).localeCompare(String(b))),
   );
 }

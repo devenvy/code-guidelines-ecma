@@ -1,6 +1,8 @@
+import { builtinRules } from 'eslint/use-at-your-own-risk';
 import globals from 'globals';
 
 import { JS_FILES, ROOT_CONFIG_FILES, TS_FILES } from '../files.mjs';
+import { completePluginRules } from '../rules/complete.mjs';
 import javascriptRules from '../rules/javascript.mjs';
 import { coreRelaxations } from '../rules/test-relaxations.mjs';
 
@@ -21,7 +23,7 @@ export function javascript(options) {
         globals: options.env === 'node' ? globals.node : globals.browser,
       },
       linterOptions: { reportUnusedDisableDirectives: 'error' },
-      rules: javascriptRules,
+      rules: completePluginRules(javascriptRules, Object.fromEntries(builtinRules), ''),
     },
     {
       name: 'devenvy/javascript/commonjs',

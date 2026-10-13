@@ -65,7 +65,8 @@
     "build:types": "tsc -p tsconfig.build.json",
     "check:package": "pnpm run build:types && publint --strict --pack pnpm && attw --pack . --profile esm-only",
     "prepack": "pnpm run build:types",
-    "guidelines:check": "code-guidelines check"
+    "guidelines:check": "code-guidelines check",
+    "rules:report": "node scripts/rules-report.mjs"
   },
   "peerDependencies": {
     "@vitest/eslint-plugin": "^1.6.27",

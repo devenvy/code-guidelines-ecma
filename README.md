@@ -112,9 +112,11 @@ rule is relaxed only where it is visible in review:
 
 ### What is enforced
 
-The rule tables in [`src/eslint/rules`](src/eslint/rules) are the effective configuration:
-every rule each plugin ships is listed with its severity, and surprising `off`s carry a reason.
-Highlights:
+The rule tables in [`src/eslint/rules`](src/eslint/rules) record a decision for each rule, and
+surprising `off`s carry a reason. A rule the installed plugin ships that no table lists, usually
+one added in a newer plugin version, is on as `error` with its default options (unless it is
+deprecated), so new rules apply without waiting for a release; one that is a problem gets turned
+off in its table and released. Highlights:
 
 - Promise safety (`no-floating-promises`, `no-misused-promises`, `await-thenable`), the
   `no-unsafe-*` family, `no-explicit-any`, `no-unnecessary-condition`, `no-deprecated`.
@@ -126,8 +128,8 @@ Highlights:
 - Imports ordered builtin → external → internal → relative → type, alphabetized; no import cycles
   (`import-x/no-cycle`, using the TypeScript resolver).
 
-Only these layers turn table rules off, and tests assert it: `no-undef` for TS files, untyped files,
-test-file relaxations, and `eslint-config-prettier` (with `curly` re-enabled).
+Only these layers turn rules off: `no-undef` for TS files, untyped files, test-file relaxations,
+and `eslint-config-prettier` (with `curly` re-enabled).
 
 ## Prettier
 
