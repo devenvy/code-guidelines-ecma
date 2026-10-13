@@ -20,6 +20,7 @@
     "state": "configured",
     "query_suite": "extended"
   },
+  "codeQualitySetup": { "state": "configured" },
   "actionsWorkflowPermissions": {
     "default_workflow_permissions": "read",
     "can_approve_pull_request_reviews": false
@@ -62,7 +63,8 @@
             { "tool": "CodeQL", "security_alerts_threshold": "all", "alerts_threshold": "all" }
           ]
         }
-      }
+      },
+      { "type": "code_quality", "parameters": { "severity": "all" } }
     ]
   }
 }
