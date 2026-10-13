@@ -70,6 +70,7 @@ export function matches(expected, actual) {
  * @property {boolean} automatedSecurityFixes
  * @property {boolean} privateVulnerabilityReporting
  * @property {Record<string, unknown> | null} codeScanningDefaultSetup
+ * @property {Record<string, unknown> | null} codeQualitySetup
  * @property {Record<string, unknown>} actionsWorkflowPermissions
  * @property {boolean | null} pagesHttpsEnforced null when Pages is not enabled
  * @property {any} ruleset null when no ruleset with the baseline's name exists
@@ -115,6 +116,11 @@ export function diffSettings(current, baseline) {
   if (!matches(baseline.codeScanningDefaultSetup, current.codeScanningDefaultSetup)) {
     problems.push(
       `code scanning default setup: ${JSON.stringify(current.codeScanningDefaultSetup)} → ${JSON.stringify(baseline.codeScanningDefaultSetup)}`,
+    );
+  }
+  if (!matches(baseline.codeQualitySetup, current.codeQualitySetup)) {
+    problems.push(
+      `code quality setup: ${JSON.stringify(current.codeQualitySetup)} → ${JSON.stringify(baseline.codeQualitySetup)}`,
     );
   }
   if (!matches(baseline.actionsWorkflowPermissions, current.actionsWorkflowPermissions)) {
@@ -225,6 +231,7 @@ export function readCurrent(repo, rulesetName, api = gh) {
     privateVulnerabilityReporting:
       getOrNull(api, `repos/${repo}/private-vulnerability-reporting`)?.enabled === true,
     codeScanningDefaultSetup: getOrNull(api, `repos/${repo}/code-scanning/default-setup`),
+    codeQualitySetup: getOrNull(api, `repos/${repo}/code-quality/setup`),
     actionsWorkflowPermissions: api([`repos/${repo}/actions/permissions/workflow`]),
     pagesHttpsEnforced: pages ? pages.https_enforced : null,
     ruleset: summary ? api([`repos/${repo}/rulesets/${summary.id}`]) : null,
@@ -257,11 +264,16 @@ export function apply(repo, baseline, current, api = gh) {
     ['-X', 'PATCH', `repos/${repo}/code-scanning/default-setup`],
     baseline.codeScanningDefaultSetup,
   );
+  api(['-X', 'PATCH', `repos/${repo}/code-quality/setup`], baseline.codeQualitySetup);
   api(
     ['-X', 'PUT', `repos/${repo}/actions/permissions/workflow`],
     baseline.actionsWorkflowPermissions,
   );
-  if (current.pagesHttpsEnforced !== null) {
+  // only when it differs: the PUT fails on a site without a certificate, e.g. a *.github.io one
+  if (
+    current.pagesHttpsEnforced !== null &&
+    current.pagesHttpsEnforced !== baseline.pagesHttpsEnforced
+  ) {
     api(['-X', 'PUT', `repos/${repo}/pages`], { https_enforced: baseline.pagesHttpsEnforced });
   }
   if (current.ruleset) {
@@ -284,7 +296,7 @@ function sleep(/** @type {number} */ ms) {
  * @param {string[]} argv
  * @param {GitHubApi} [api]
  * @param {{ attempts?: number, delayMs?: number }} [settle] re-read policy after apply;
- *   code-scanning default setup is applied asynchronously by GitHub
+ *   code scanning and code quality setups are applied asynchronously by GitHub
  * @returns {{ code: number, output: string[] }}
  */
 export function run(argv, api = gh, settle = {}) {

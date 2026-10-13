@@ -29,6 +29,7 @@ function compliant() {
       query_suite: 'extended',
       languages: ['actions'],
     },
+    codeQualitySetup: { state: 'configured', languages: ['javascript-typescript'] },
     actionsWorkflowPermissions: {
       default_workflow_permissions: 'read',
       can_approve_pull_request_reviews: false,
@@ -58,6 +59,7 @@ describe('repo settings', () => {
     current.repository.security_and_analysis.secret_scanning.status = 'disabled';
     current.vulnerabilityAlerts = false;
     current.codeScanningDefaultSetup = { state: 'not-configured' };
+    current.codeQualitySetup = null;
     current.actionsWorkflowPermissions.default_workflow_permissions = 'write';
     current.pagesHttpsEnforced = false;
     current.ruleset.rules = current.ruleset.rules.filter((r) => r.type !== 'deletion');
@@ -67,6 +69,7 @@ describe('repo settings', () => {
       'security_and_analysis.secret_scanning: disabled → enabled',
       'vulnerabilityAlerts: false → true',
       'code scanning default setup: {"state":"not-configured"} → {"state":"configured","query_suite":"extended"}',
+      'code quality setup: null → {"state":"configured"}',
       'actions workflow permissions: {"default_workflow_permissions":"write","can_approve_pull_request_reviews":false} → {"default_workflow_permissions":"read","can_approve_pull_request_reviews":false}',
       'pages https_enforced: false → true',
       'ruleset rule deletion: missing',
@@ -117,6 +120,7 @@ function compliantRoutes() {
     'repos/o/r/automated-security-fixes': { enabled: true },
     'repos/o/r/private-vulnerability-reporting': { enabled: true },
     'repos/o/r/code-scanning/default-setup': current.codeScanningDefaultSetup,
+    'repos/o/r/code-quality/setup': current.codeQualitySetup,
     'repos/o/r/actions/permissions/workflow': current.actionsWorkflowPermissions,
     'repos/o/r/pages': { https_enforced: true },
   };
@@ -165,6 +169,7 @@ describe('repo settings against the API', () => {
       'PUT repos/o/r/automated-security-fixes',
       'PUT repos/o/r/private-vulnerability-reporting',
       'PATCH repos/o/r/code-scanning/default-setup',
+      'PATCH repos/o/r/code-quality/setup',
       'PUT repos/o/r/actions/permissions/workflow',
       'POST repos/o/r/rulesets',
     ]);
@@ -174,9 +179,13 @@ describe('repo settings against the API', () => {
   it('apply updates an existing ruleset and pages, then reports success', () => {
     const routes = compliantRoutes();
     routes['repos/o/r'] = { ...routes['repos/o/r'], delete_branch_on_merge: false };
+    routes['repos/o/r/pages'] = { https_enforced: false };
     const { api, writes } = fakeApi(routes, (method, endpoint, body) => {
       if (method === 'PATCH' && endpoint === 'repos/o/r') {
         routes['repos/o/r'] = { ...routes['repos/o/r'], ...body };
+      }
+      if (method === 'PUT' && endpoint === 'repos/o/r/pages') {
+        routes['repos/o/r/pages'] = body;
       }
     });
     const result = run(['apply', 'o/r'], api);
@@ -184,6 +193,14 @@ describe('repo settings against the API', () => {
     expect(calls(writes)).toContain('PUT repos/o/r/pages');
     expect(result.code).toBe(0);
     expect(result.output.at(-1)).toBe('Applied.');
+  });
+
+  it('apply leaves Pages alone when HTTPS is already enforced', () => {
+    const routes = compliantRoutes();
+    routes['repos/o/r'] = { ...routes['repos/o/r'], allow_auto_merge: false };
+    const { api, writes } = fakeApi(routes);
+    apply('o/r', baseline, readCurrent('o/r', 'main', api), api);
+    expect(calls(writes)).not.toContain('PUT repos/o/r/pages');
   });
 
   it('apply reports settings that did not take effect', () => {

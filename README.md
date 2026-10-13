@@ -221,8 +221,9 @@ the test run itself fails when coverage drops.
 
 [`scripts/repo-settings`](scripts/repo-settings) checks or applies the GitHub baseline — squash-only
 merges with PR titles, branch cleanup, secret scanning with push protection, Dependabot alerts and
-security updates, CodeQL default setup with the extended suite, read-only workflow tokens, HTTPS for
-Pages, and a `main` ruleset requiring the `result` check:
+security updates, CodeQL default setup with the extended suite, GitHub Code Quality, read-only
+workflow tokens, HTTPS for Pages, and a `main` ruleset requiring the `result` check and blocking
+merges on any CodeQL or Code Quality finding:
 
 ```sh
 node scripts/repo-settings/repo-settings.mjs check devenvy/storm-watch
