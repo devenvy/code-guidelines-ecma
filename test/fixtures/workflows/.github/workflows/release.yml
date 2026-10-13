@@ -1,7 +1,0 @@
-on:
-  release:
-    types: [published]
-jobs:
-  publish:
-    steps:
-      - run: pnpm publish

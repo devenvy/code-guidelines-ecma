@@ -184,7 +184,7 @@ no `root` line exists.
 
 ## CI and releases
 
-Each repo owns its workflows (no shared/reusable workflows). The DevEnvy convention, with
+Each repo owns its workflows (no shared/reusable workflows). The DevEnvy CI convention, with
 [storm-watch](https://github.com/devenvy/storm-watch) as the reference setup, is checked by
 `code-guidelines check`:
 
@@ -199,24 +199,24 @@ Each repo owns its workflows (no shared/reusable workflows). The DevEnvy convent
     allow-list.
   - `dependabot-auto-merge`, and `result`, which needs every other job and is the single
     required status check.
-- **`release.yml`**, which publishes:
-  - on **push to `main`** (apps): CI, then the site deploys and the container image is pushed as
-    `latest` and `sha-<commit>`. Merges in quick succession queue up, so only the latest `main`
-    deploys after the one in progress.
-  - on a **published GitHub release** (tag `vX.Y.Z` on `main`, cut by hand whenever you like): CI,
-    then the versioned artifacts — the npm package (version set from the tag), the container image
-    as `X.Y.Z` and `X.Y`, release assets — with build provenance attestations and an SPDX SBOM
-    (`pnpm sbom`).
 - **`scorecard.yml`**: [OpenSSF Scorecard](https://scorecard.dev) on pushes to `main` and weekly.
   Its own workflow because publishing results restricts what else the workflow may contain.
 - **`.github/dependabot.yml`** with a 7-day cooldown.
 - Bot actions (Dependabot auto-merge) run as the devenvy-bot GitHub App — org variable
   `DEVENVY_BOT_CLIENT_ID`, org secret `DEVENVY_BOT_PRIVATE_KEY`, both also as Dependabot secrets —
-  so the merges trigger the `main` workflows, which `GITHUB_TOKEN` merges do not. Each token
+  so the merges trigger workflows on `main`, which `GITHUB_TOKEN` merges do not. Each token
   requests only the permissions its step needs.
 
-Cut a release with `gh release create v1.2.0 --target main --generate-notes`, or from the Releases
-page with "Generate release notes".
+How a repo publishes is its own choice and is not checked. The two styles in use, both running CI
+first and attesting what they publish (build provenance, SPDX SBOM via `pnpm sbom`):
+
+- **Latest from `main`** (apps, e.g. storm-watch): every push to `main` deploys the site and pushes
+  the container image as `latest` and `sha-<commit>`. Merges in quick succession queue up, so only
+  the newest `main` deploys after the one in progress. Versioned releases are optional.
+- **Releases cut by hand** (npm packages, e.g. this one): publishing a GitHub release —
+  `gh release create v1.2.0 --target main --generate-notes`, or the Releases page — publishes that
+  version (the npm package with its version set from the tag, an image as `X.Y.Z` and `X.Y`,
+  release assets).
 
 Coverage needs Vitest's `json-summary` and `json` reporters; set thresholds in the test config so
 the test run itself fails when coverage drops.

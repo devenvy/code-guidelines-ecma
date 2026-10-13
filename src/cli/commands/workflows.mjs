@@ -21,7 +21,6 @@ const CI_JOBS = [
 ];
 const NOT_GATED = new Set(['result', 'dependabot-auto-merge']);
 
-const RELEASE_FILE = '.github/workflows/release.yml';
 const SCORECARD_FILE = '.github/workflows/scorecard.yml';
 const DEPENDABOT_FILE = '.github/dependabot.yml';
 
@@ -57,7 +56,8 @@ function lintScripts(choices) {
 }
 
 /**
- * Checks the DevEnvy CI and release convention (see the README's "CI and releases").
+ * Checks the DevEnvy CI convention (see the README's "CI and releases"). How a repo releases is
+ * its own choice, so release workflows are not checked.
  * @param {string} dir
  * @param {import('../managed.mjs').Choices} choices
  * @returns {Problem[]}
@@ -68,14 +68,6 @@ export function checkWorkflows(dir, choices) {
   const ci = readYaml(dir, CI_FILE, problems);
   if (ci) {
     problems.push(...checkCi(ci, choices).map((message) => ({ file: CI_FILE, message })));
-  }
-  const release = readYaml(dir, RELEASE_FILE, problems);
-  if (release && !runsOnPublishedRelease(release)) {
-    problems.push({
-      file: RELEASE_FILE,
-      message:
-        'must run on release (types: [published]): publishing a GitHub release cuts a version',
-    });
   }
   const scorecard = readYaml(dir, SCORECARD_FILE, problems);
   if (scorecard && !allSteps(scorecard).some((step) => usesAction(step, 'ossf/scorecard-action'))) {
@@ -144,32 +136,16 @@ function checkCi(ci, choices) {
 }
 
 /**
- * The events a workflow runs on, with each event's settings (`null` when it has none).
+ * The events a workflow runs on (`on:` as a string, a list or a map).
  * @param {Workflow} doc
- * @returns {Map<string, Record<string, unknown> | null>}
+ * @returns {Set<string>}
  */
 function triggers(doc) {
   // `yaml` parses the bare key `on` as the string "on" (YAML 1.2), not a boolean.
   const { on } = doc;
-  if (typeof on === 'string' || Array.isArray(on)) {
-    return new Map(toStrings(on).map((event) => [event, null]));
-  }
-  return new Map(
-    Object.entries(asRecord(on) ?? {}).map(([event, settings]) => [event, asRecord(settings)]),
+  return new Set(
+    typeof on === 'string' || Array.isArray(on) ? toStrings(on) : Object.keys(asRecord(on) ?? {}),
   );
-}
-
-/**
- * True when the workflow runs on a published release (no `types` means every type).
- * @param {Workflow} doc
- */
-function runsOnPublishedRelease(doc) {
-  const events = triggers(doc);
-  if (!events.has('release')) {
-    return false;
-  }
-  const { types } = events.get('release') ?? {};
-  return types === undefined || (Array.isArray(types) && types.includes('published'));
 }
 
 /**

@@ -503,17 +503,19 @@ describe('check: CI convention', () => {
     return (await cli(dir, 'check')).output;
   }
 
-  it('reports every missing workflow and release file', async () => {
+  // A repo chooses how it releases, so no release workflow is required.
+  it('reports every missing workflow file except a release workflow', async () => {
     const dir = await initialised();
     rmSync(path.join(dir, '.github'), { recursive: true });
-    expect(await problems(dir)).toEqual(
+    const output = await problems(dir);
+    expect(output).toEqual(
       expect.arrayContaining([
         `${CI}: missing`,
-        '.github/workflows/release.yml: missing',
         '.github/workflows/scorecard.yml: missing',
         '.github/dependabot.yml: missing',
       ]),
     );
+    expect(output.some((line) => line.includes('release'))).toBe(false);
   });
 
   it('reports jobs and steps that drift from the convention', async () => {
@@ -540,40 +542,26 @@ describe('check: CI convention', () => {
     );
   });
 
-  it('requires a pull_request trigger, a published-release trigger and valid YAML', async () => {
+  it('requires a pull_request trigger and valid YAML', async () => {
     const dir = await initialised();
     writeFileSync(path.join(dir, CI), read(dir, CI).replace(/^on:\n.*\n/m, 'on: push\n'));
-    const release = '.github/workflows/release.yml';
-    writeFileSync(path.join(dir, release), 'on:\n  push:\n    branches: [main]\njobs: {}\n');
     writeFileSync(path.join(dir, '.github/workflows/scorecard.yml'), 'jobs: [\n');
     const output = await problems(dir);
-    const RELEASE_PROBLEM = `${release}: must run on release (types: [published]): publishing a GitHub release cuts a version`;
-    expect(output).toEqual(
-      expect.arrayContaining([`${CI}: must run on pull_request`, RELEASE_PROBLEM]),
-    );
+    expect(output).toContain(`${CI}: must run on pull_request`);
     expect(output.join('\n')).toContain('.github/workflows/scorecard.yml: invalid YAML');
-
-    writeFileSync(path.join(dir, release), 'on:\n  release:\n    types: [created]\n');
-    expect(await problems(dir)).toContain(RELEASE_PROBLEM);
   });
 
-  it('accepts every form of the release and pull_request triggers', async () => {
+  it('accepts every form of the pull_request trigger', async () => {
     const dir = await initialised();
-    const release = '.github/workflows/release.yml';
-    for (const [ci, on] of [
-      ['on: pull_request\n', 'on: release\n'],
-      ['on: [push, pull_request]\n', 'on: [push, release]\n'],
-      ['on:\n  pull_request:\n', 'on:\n  push:\n  release:\n'],
-      [
-        'on:\n  pull_request:\n    types: [opened]\n',
-        'on:\n  release:\n    types: [published, edited]\n',
-      ],
+    for (const on of [
+      'on: pull_request\n',
+      'on: [push, pull_request]\n',
+      'on:\n  pull_request:\n',
+      'on:\n  pull_request:\n    types: [opened]\n',
     ]) {
       const text = read(dir, CI);
-      writeFileSync(path.join(dir, CI), ci + text.slice(text.indexOf('jobs:')));
-      writeFileSync(path.join(dir, release), on);
-      const output = (await problems(dir)).join('\n');
-      expect(output).not.toContain('must run on');
+      writeFileSync(path.join(dir, CI), on + text.slice(text.indexOf('jobs:')));
+      expect(await problems(dir)).not.toContain(`${CI}: must run on pull_request`);
     }
   });
 
