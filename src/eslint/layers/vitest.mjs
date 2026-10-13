@@ -1,6 +1,6 @@
 import { JS_FILES, TS_FILES } from '../files.mjs';
 import { importPeer } from '../peer.mjs';
-import { completePluginRules } from '../rules/complete.mjs';
+import { installedPluginRules } from '../rules/installed.mjs';
 import { coreRelaxations, typescriptTestRelaxations } from '../rules/test-relaxations.mjs';
 import vitestRules from '../rules/vitest.mjs';
 
@@ -37,7 +37,7 @@ export async function vitest(options, deps = {}) {
     deps.importModule,
   );
   const { files } = options.vitest;
-  const rules = completePluginRules(vitestRules, vitestPlugin.rules, 'vitest/');
+  const rules = installedPluginRules(vitestRules, vitestPlugin.rules, 'vitest/');
   /** @type {import('eslint').Linter.Config[]} */
   const configs = [
     {

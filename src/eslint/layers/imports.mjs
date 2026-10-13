@@ -2,8 +2,8 @@ import { createTypeScriptImportResolver } from 'eslint-import-resolver-typescrip
 import importX from 'eslint-plugin-import-x';
 
 import { JS_FILES, TS_FILES } from '../files.mjs';
-import { completePluginRules } from '../rules/complete.mjs';
 import importRules from '../rules/imports.mjs';
+import { installedPluginRules } from '../rules/installed.mjs';
 
 const BUILTIN_INTERNAL = ['^@devenvy/', '^@/', '^~/'];
 
@@ -27,7 +27,7 @@ export function imports(options) {
         ],
       },
       rules: /** @type {import('eslint').Linter.RulesRecord} */ ({
-        ...completePluginRules(importRules, importX.rules, 'import-x/'),
+        ...installedPluginRules(importRules, importX.rules, 'import-x/'),
         'import-x/order': [
           'error',
           {

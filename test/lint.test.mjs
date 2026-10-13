@@ -3,15 +3,13 @@ import path from 'node:path';
 import { ESLint } from 'eslint';
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { TABLED_RULES } from './tabled-rules.mjs';
 import { createConfig } from '../src/eslint/index.mjs';
 import angularRules from '../src/eslint/rules/angular.mjs';
 
 const fixtures = path.resolve(import.meta.dirname, 'fixtures');
 
 /**
- * Lints a fixture and returns `{ [relativeFile]: sortedRuleIds }` for every file linted. Rules the
- * tables do not decide (new in a plugin, on by default) are left out, so plugin updates pass.
+ * Lints a fixture and returns `{ [relativeFile]: sortedRuleIds }` for every file linted.
  * @param {string} name
  * @param {Omit<import('../src/eslint/index.mjs').Options, 'rootDir'>} options
  * @param {import('eslint').Linter.Config[]} [overrides]
@@ -27,13 +25,7 @@ async function lintFixture(name, options, overrides = []) {
   return Object.fromEntries(
     results.map((result) => [
       path.relative(cwd, result.filePath).replaceAll('\\', '/'),
-      [
-        ...new Set(
-          result.messages
-            .filter((m) => m.ruleId === null || TABLED_RULES.has(m.ruleId))
-            .map((m) => m.ruleId ?? `fatal: ${m.message}`),
-        ),
-      ].sort(),
+      [...new Set(result.messages.map((m) => m.ruleId ?? `fatal: ${m.message}`))].sort(),
     ]),
   );
 }

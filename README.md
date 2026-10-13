@@ -112,11 +112,10 @@ rule is relaxed only where it is visible in review:
 
 ### What is enforced
 
-The rule tables in [`src/eslint/rules`](src/eslint/rules) record a decision for each rule, and
-surprising `off`s carry a reason. A rule the installed plugin ships that no table lists, usually
-one added in a newer plugin version, is on as `error` with its default options (unless it is
-deprecated), so new rules apply without waiting for a release; one that is a problem gets turned
-off in its table and released. Highlights:
+The rule tables in [`src/eslint/rules`](src/eslint/rules) are the effective configuration:
+every rule each plugin ships is listed with its severity, and surprising `off`s carry a reason. A
+rule a newer plugin version adds stays off in your project until a release of this package decides
+it. Highlights:
 
 - Promise safety (`no-floating-promises`, `no-misused-promises`, `await-thenable`), the
   `no-unsafe-*` family, `no-explicit-any`, `no-unnecessary-condition`, `no-deprecated`.

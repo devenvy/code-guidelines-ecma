@@ -1,8 +1,8 @@
 name: CI
 
 # Same layout as consumer repos: lint, test, build, audit, dependency-review,
-# repo-specific jobs (here: rules), Dependabot auto-merge, and result as the single required
-# status check. `code-guidelines check` verifies this layout.
+# repo-specific jobs (here: rules and the Dependabot rule decisions), Dependabot auto-merge, and
+# result as the single required status check.
 on:
   pull_request:
   schedule:
@@ -132,8 +132,8 @@ jobs:
             CC0-1.0, CC-BY-4.0, MPL-2.0, Unlicense, Python-2.0
 
   # Every rule of every bundled plugin must be decided in src/eslint/rules, and any change to the
-  # effective configuration must be reviewed as a snapshot diff. On a Dependabot plugin bump this
-  # job names the new rules that need a decision.
+  # effective configuration must be reviewed as a snapshot diff. On a Dependabot plugin bump it
+  # fails until dependabot-rules-commit adds the new rules.
   rules:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -150,8 +150,89 @@ jobs:
       - name: Rule inventory and effective-config snapshots
         run: pnpm exec vitest run test/rule-inventory.test.mjs test/effective-config.test.mjs --coverage.enabled=false
 
+  # Dependabot PRs: decides the rules new plugin versions add (`rules:add`: on as error, Prettier's
+  # formatting rules off) and refreshes the effective-config snapshots. This job runs the updated
+  # packages, so it holds no write access; dependabot-rules-commit commits its patch.
+  dependabot-rules:
+    if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run rules:add
+      - run: pnpm exec vitest run test/effective-config.test.mjs --update --coverage.enabled=false
+      - id: diff
+        run: |
+          git diff --binary -- src/eslint/rules test/__snapshots__ > rules.patch
+          if [ -s rules.patch ]; then echo "changed=true" >> "$GITHUB_OUTPUT"; fi
+      - if: steps.diff.outputs.changed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rules-patch
+          path: rules.patch
+          if-no-files-found: error
+
+  # Commits dependabot-rules' patch to the PR as devenvy-bot, which re-runs CI (a GITHUB_TOKEN push
+  # would not). Runs nothing from the repository or its dependencies, and applies the patch only
+  # if it touches the rule tables and snapshots alone.
+  dependabot-rules-commit:
+    needs: dependabot-rules
+    if: needs.dependabot-rules.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.DEVENVY_BOT_CLIENT_ID }}
+          private-key: ${{ secrets.DEVENVY_BOT_PRIVATE_KEY }}
+          # pushing to the Dependabot branch
+          permission-contents: write
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: rules-patch
+          path: ${{ runner.temp }}/rules
+      - name: Commit the rule decisions to the PR
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          PATCH: ${{ runner.temp }}/rules/rules.patch
+        run: |
+          for file in $(git apply --numstat "$PATCH" | cut -f3); do
+            case "$file" in
+              src/eslint/rules/*.mjs | test/__snapshots__/*.snap) ;;
+              *) echo "::error::the patch changes $file"; exit 1 ;;
+            esac
+          done
+          git apply "$PATCH"
+          user_id=$(gh api "users/${APP_SLUG}%5Bbot%5D" --jq .id)
+          git add -- src/eslint/rules test/__snapshots__
+          git -c user.name="${APP_SLUG}[bot]" \
+            -c user.email="${user_id}+${APP_SLUG}[bot]@users.noreply.github.com" \
+            commit -m "chore: decide the rules new plugin versions add (on until turned off)"
+          # fails if Dependabot moved the branch meanwhile; the run for the new head decides again
+          git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "HEAD:refs/heads/${HEAD_REF}"
+
   # Dependabot PRs merge themselves once the required check passes (a plugin bump that adds rules
-  # waits on the rules job). Runs as the devenvy-bot app so the merge triggers release.yml.
+  # passes once dependabot-rules-commit has added them). Runs as the devenvy-bot app so the merge triggers release.yml.
   # Needs the org Dependabot secrets DEVENVY_BOT_CLIENT_ID and DEVENVY_BOT_PRIVATE_KEY.
   dependabot-auto-merge:
     if: github.event_name == 'pull_request' && github.event.pull_request.user.login == 'dependabot[bot]'

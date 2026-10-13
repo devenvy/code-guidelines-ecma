@@ -30,10 +30,12 @@ Prettier and TypeScript resolve the package name exactly as consumers do (pnpm o
 
 ## Tests
 
-- **complete-rules** — undecided rules are turned on, deprecated ones are not, and table entries
-  for rules a plugin no longer ships are dropped.
-- **effective-config** — snapshots the severity of every tabled rule for representative files.
-- **lint** — runs ESLint on the fixtures and asserts the exact tabled rules reported per file.
+- **rule-inventory** — every rule each plugin ships is decided; no deprecated or removed rules;
+  nothing the tables enable is turned off by `eslint-config-prettier` (except the re-enabled
+  `curly`).
+- **effective-config** — snapshots the resolved rules for representative files.
+- **rules-add** — the table edits `pnpm run rules:add` makes.
+- **lint** — runs ESLint on the fixtures and asserts the exact rules reported per file.
 - **cli / cli-lib** — init, check (including weakened ESLint and tsconfig settings) and sync
   against temp projects.
 - **pack** — packs the tarball, installs it with npm into fresh consumer projects and runs the full
@@ -43,15 +45,15 @@ Prettier and TypeScript resolve the package name exactly as consumers do (pnpm o
 
 ## Upgrading plugins
 
-Dependabot opens one weekly npm PR including majors, and devenvy-bot enables auto-merge on it.
-Plugin updates need nothing from you: a new rule is on as `error` (see `src/eslint/rules/complete.mjs`),
-and a removed one drops out of its table. Consumer apps get new rules the same way when their own
-Dependabot updates a plugin, so an app's PR fails if a new rule flags its code. The PR here waits
-only if a new rule flags the fixtures (the pack test lints them with `--max-warnings 0`).
+Dependabot opens one weekly npm PR including majors, and devenvy-bot enables auto-merge on it. When a
+plugin update adds rules, CI decides them on the PR: `dependabot-rules` runs `pnpm run rules:add`
+(new rules on as `error`, typescript-eslint's replaced core rules and Prettier's formatting rules
+`off`; removed and deprecated rules taken out) and refreshes the snapshots, and
+`dependabot-rules-commit` commits that as devenvy-bot, which re-runs CI. The PR then merges itself
+unless a new rule flags this repo's own code or the fixtures; then it waits for you.
 
-To turn a rule off, or set its options, add it to its table in a PR and cut a release.
-`pnpm run rules:report` lists what the tables do not decide (new, removed and deprecated rules,
-and enabled rules `eslint-config-prettier` turns off anyway), for tidying when convenient.
+New rules reach apps with the next release. To turn one off or set its options, change its table
+entry in a PR. `pnpm run rules:add` does the same locally.
 
 ## Releasing
 

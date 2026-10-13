@@ -2,7 +2,7 @@ import { HTML_FILES, INDEX_HTML_FILES, TS_FILES } from '../files.mjs';
 import { importPeer } from '../peer.mjs';
 import angularTemplateRules from '../rules/angular-template.mjs';
 import angularRules from '../rules/angular.mjs';
-import { completePluginRules } from '../rules/complete.mjs';
+import { installedPluginRules } from '../rules/installed.mjs';
 
 const MISSING_ANGULAR_ESLINT =
   'createConfig: angular: {...} requires "angular-eslint". Install it: npm i -D angular-eslint';
@@ -27,7 +27,7 @@ export async function angular(options, deps = {}) {
       plugins: { '@angular-eslint': ng.tsPlugin },
       processor: ng.processInlineTemplates,
       rules: {
-        ...completePluginRules(angularRules, ng.tsPlugin.rules, '@angular-eslint/'),
+        ...installedPluginRules(angularRules, ng.tsPlugin.rules, '@angular-eslint/'),
         '@angular-eslint/component-selector': [
           'error',
           { type: 'element', prefix, style: 'kebab-case' },
@@ -45,7 +45,7 @@ export async function angular(options, deps = {}) {
       plugins: { '@angular-eslint/template': ng.templatePlugin },
       languageOptions: { parser: ng.templateParser },
       rules: {
-        ...completePluginRules(
+        ...installedPluginRules(
           angularTemplateRules,
           ng.templatePlugin.rules,
           '@angular-eslint/template/',
