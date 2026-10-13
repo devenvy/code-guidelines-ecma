@@ -189,7 +189,6 @@ Each repo owns its workflows (no shared/reusable workflows). The DevEnvy convent
 `code-guidelines check`:
 
 - **`ci.yml`** (pull requests and a weekly run), one job each:
-  - `pr-title`: the PR title is a conventional commit.
   - `lint`: `guidelines:check`, `lint`, `format:check`, `typecheck` (TypeScript projects),
     `knip` (unused files, exports and dependencies), [actionlint](https://github.com/rhysd/actionlint) and
     [zizmor](https://docs.zizmor.sh) (GitHub Actions security).
@@ -200,19 +199,24 @@ Each repo owns its workflows (no shared/reusable workflows). The DevEnvy convent
     allow-list.
   - `dependabot-auto-merge`, and `result`, which needs every other job and is the single
     required status check.
-- **`release.yml`** (push to `main`): release-please keeps a release PR current and enables
-  auto-merge on it; when it merges, the same run builds and publishes (npm package, release assets,
-  container image) with build provenance attestations and an SPDX SBOM (`pnpm sbom`).
+- **`release.yml`**, which publishes:
+  - on **push to `main`** (apps): CI, then the site deploys and the container image is pushed as
+    `latest` and `sha-<commit>`. Merges in quick succession queue up, so only the latest `main`
+    deploys after the one in progress.
+  - on a **published GitHub release** (tag `vX.Y.Z` on `main`, cut by hand whenever you like): CI,
+    then the versioned artifacts — the npm package (version set from the tag), the container image
+    as `X.Y.Z` and `X.Y`, release assets — with build provenance attestations and an SPDX SBOM
+    (`pnpm sbom`).
 - **`scorecard.yml`**: [OpenSSF Scorecard](https://scorecard.dev) on pushes to `main` and weekly.
   Its own workflow because publishing results restricts what else the workflow may contain.
-- **`.github/dependabot.yml`** with a 7-day cooldown, and release-please's
-  `release-please-config.json` / `.release-please-manifest.json`.
-- PR titles are conventional commits (`feat:`, `fix:`, `feat!:`, `chore:` …): squash merges use the
-  title as the commit message, and release-please reads those.
-- Bot actions (release PRs, auto-merge) run as the devenvy-bot GitHub App — org variable
+- **`.github/dependabot.yml`** with a 7-day cooldown.
+- Bot actions (Dependabot auto-merge) run as the devenvy-bot GitHub App — org variable
   `DEVENVY_BOT_CLIENT_ID`, org secret `DEVENVY_BOT_PRIVATE_KEY`, both also as Dependabot secrets —
-  so they trigger other workflows, which `GITHUB_TOKEN` actions do not. Each token requests only
-  the permissions its step needs.
+  so the merges trigger the `main` workflows, which `GITHUB_TOKEN` merges do not. Each token
+  requests only the permissions its step needs.
+
+Cut a release with `gh release create v1.2.0 --target main --generate-notes`, or from the Releases
+page with "Generate release notes".
 
 Coverage needs Vitest's `json-summary` and `json` reporters; set thresholds in the test config so
 the test run itself fails when coverage drops.

@@ -14,11 +14,6 @@ updates:
     labels: [dependencies]
     cooldown:
       default-days: 7
-    # conventional titles for release-please: runtime bumps release a patch, dev bumps do not
-    commit-message:
-      prefix: fix
-      prefix-development: chore
-      include: scope
     groups:
       dependencies:
         applies-to: version-updates
@@ -43,8 +38,6 @@ updates:
     labels: [dependencies]
     cooldown:
       default-days: 7
-    commit-message:
-      prefix: ci
     groups:
       actions:
         patterns: ['*']

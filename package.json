@@ -1,6 +1,6 @@
 {
   "name": "@devenvy/code-guidelines",
-  "version": "2.0.0",
+  "version": "0.0.0",
   "description": "DevEnvy code guidelines for JavaScript, TypeScript and Angular: ESLint, Prettier, tsconfig bases and a repo baseline CLI.",
   "license": "MIT",
   "author": "DevEnvy",

@@ -506,16 +506,12 @@ describe('check: CI convention', () => {
   it('reports every missing workflow and release file', async () => {
     const dir = await initialised();
     rmSync(path.join(dir, '.github'), { recursive: true });
-    rmSync(path.join(dir, 'release-please-config.json'));
-    rmSync(path.join(dir, '.release-please-manifest.json'));
     expect(await problems(dir)).toEqual(
       expect.arrayContaining([
         `${CI}: missing`,
         '.github/workflows/release.yml: missing',
         '.github/workflows/scorecard.yml: missing',
         '.github/dependabot.yml: missing',
-        'release-please-config.json: missing',
-        '.release-please-manifest.json: missing',
       ]),
     );
   });
@@ -523,7 +519,6 @@ describe('check: CI convention', () => {
   it('reports jobs and steps that drift from the convention', async () => {
     const dir = await initialised();
     const ci = read(dir, CI)
-      .replace('types: [opened, synchronize, reopened, edited]', 'types: [opened]')
       .replace('      - run: pnpm run knip\n', '')
       .replace('      - uses: zizmorcore/zizmor-action@v0\n', '')
       .replace('      - run: pnpm run test:ci\n', '      - run: pnpm test\n')
@@ -534,7 +529,6 @@ describe('check: CI convention', () => {
     writeFileSync(path.join(dir, CI), ci);
     expect(await problems(dir)).toEqual(
       expect.arrayContaining([
-        `${CI}: pull_request types must include "edited" so a fixed PR title is checked again`,
         `${CI}: missing job "audit"`,
         `${CI}: job "result" must run with if: always()`,
         `${CI}: job "result" must need every job; missing: docker`,
@@ -546,19 +540,41 @@ describe('check: CI convention', () => {
     );
   });
 
-  it('requires a pull_request trigger, release-please and valid YAML', async () => {
+  it('requires a pull_request trigger, a published-release trigger and valid YAML', async () => {
     const dir = await initialised();
-    writeFileSync(path.join(dir, CI), read(dir, CI).replace(/^on:\n.*\n.*\n/m, 'on: push\n'));
-    writeFileSync(path.join(dir, '.github/workflows/release.yml'), 'jobs: {}\n');
+    writeFileSync(path.join(dir, CI), read(dir, CI).replace(/^on:\n.*\n/m, 'on: push\n'));
+    const release = '.github/workflows/release.yml';
+    writeFileSync(path.join(dir, release), 'on:\n  push:\n    branches: [main]\njobs: {}\n');
     writeFileSync(path.join(dir, '.github/workflows/scorecard.yml'), 'jobs: [\n');
     const output = await problems(dir);
+    const RELEASE_PROBLEM = `${release}: must run on release (types: [published]): publishing a GitHub release cuts a version`;
     expect(output).toEqual(
-      expect.arrayContaining([
-        `${CI}: must run on pull_request`,
-        '.github/workflows/release.yml: no step uses googleapis/release-please-action',
-      ]),
+      expect.arrayContaining([`${CI}: must run on pull_request`, RELEASE_PROBLEM]),
     );
     expect(output.join('\n')).toContain('.github/workflows/scorecard.yml: invalid YAML');
+
+    writeFileSync(path.join(dir, release), 'on:\n  release:\n    types: [created]\n');
+    expect(await problems(dir)).toContain(RELEASE_PROBLEM);
+  });
+
+  it('accepts every form of the release and pull_request triggers', async () => {
+    const dir = await initialised();
+    const release = '.github/workflows/release.yml';
+    for (const [ci, on] of [
+      ['on: pull_request\n', 'on: release\n'],
+      ['on: [push, pull_request]\n', 'on: [push, release]\n'],
+      ['on:\n  pull_request:\n', 'on:\n  push:\n  release:\n'],
+      [
+        'on:\n  pull_request:\n    types: [opened]\n',
+        'on:\n  release:\n    types: [published, edited]\n',
+      ],
+    ]) {
+      const text = read(dir, CI);
+      writeFileSync(path.join(dir, CI), ci + text.slice(text.indexOf('jobs:')));
+      writeFileSync(path.join(dir, release), on);
+      const output = (await problems(dir)).join('\n');
+      expect(output).not.toContain('must run on');
+    }
   });
 
   it('requires the scripts CI runs', async () => {

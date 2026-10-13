@@ -1,4 +1,7 @@
-jobs:
+on:
   release:
+    types: [published]
+jobs:
+  publish:
     steps:
-      - uses: googleapis/release-please-action@v5
+      - run: pnpm publish

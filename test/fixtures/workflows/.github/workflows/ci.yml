@@ -1,11 +1,7 @@
 # Smallest ci.yml that satisfies `code-guidelines check`.
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
 jobs:
-  pr-title:
-    steps:
-      - uses: amannn/action-semantic-pull-request@v6
   lint:
     steps:
       - run: pnpm run guidelines:check
@@ -32,6 +28,6 @@ jobs:
       - run: gh pr merge --auto --squash
   result:
     if: always()
-    needs: [pr-title, lint, test, build, audit, dependency-review]
+    needs: [lint, test, build, audit, dependency-review]
     steps:
       - run: 'true'

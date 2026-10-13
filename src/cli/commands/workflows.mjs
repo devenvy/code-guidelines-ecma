@@ -11,7 +11,6 @@ const CI_FILE = '.github/workflows/ci.yml';
  * other job except `dependabot-auto-merge` (which runs only on Dependabot PRs).
  */
 const CI_JOBS = [
-  'pr-title',
   'lint',
   'test',
   'build',
@@ -22,14 +21,9 @@ const CI_JOBS = [
 ];
 const NOT_GATED = new Set(['result', 'dependabot-auto-merge']);
 
-/** Files that must exist, with an action one of their steps must use (`null`: existence only). */
-const REQUIRED_FILES = /** @type {const} */ ([
-  ['.github/workflows/release.yml', 'googleapis/release-please-action'],
-  ['.github/workflows/scorecard.yml', 'ossf/scorecard-action'],
-  ['.github/dependabot.yml', null],
-  ['release-please-config.json', null],
-  ['.release-please-manifest.json', null],
-]);
+const RELEASE_FILE = '.github/workflows/release.yml';
+const SCORECARD_FILE = '.github/workflows/scorecard.yml';
+const DEPENDABOT_FILE = '.github/dependabot.yml';
 
 /**
  * @typedef {{ file: string, message: string }} Problem
@@ -75,15 +69,20 @@ export function checkWorkflows(dir, choices) {
   if (ci) {
     problems.push(...checkCi(ci, choices).map((message) => ({ file: CI_FILE, message })));
   }
-  for (const [file, action] of REQUIRED_FILES) {
-    if (file.endsWith('.yml')) {
-      const doc = readYaml(dir, file, problems);
-      if (doc && action && !allSteps(doc).some((step) => usesAction(step, action))) {
-        problems.push({ file, message: `no step uses ${action}` });
-      }
-    } else if (!readText(path.join(dir, file)).exists) {
-      problems.push({ file, message: 'missing' });
-    }
+  const release = readYaml(dir, RELEASE_FILE, problems);
+  if (release && !runsOnPublishedRelease(release)) {
+    problems.push({
+      file: RELEASE_FILE,
+      message:
+        'must run on release (types: [published]): publishing a GitHub release cuts a version',
+    });
+  }
+  const scorecard = readYaml(dir, SCORECARD_FILE, problems);
+  if (scorecard && !allSteps(scorecard).some((step) => usesAction(step, 'ossf/scorecard-action'))) {
+    problems.push({ file: SCORECARD_FILE, message: 'no step uses ossf/scorecard-action' });
+  }
+  if (!readText(path.join(dir, DEPENDABOT_FILE)).exists) {
+    problems.push({ file: DEPENDABOT_FILE, message: 'missing' });
   }
   return problems;
 }
@@ -96,14 +95,8 @@ export function checkWorkflows(dir, choices) {
 function checkCi(ci, choices) {
   /** @type {string[]} */
   const messages = [];
-  // `yaml` parses the bare key `on` as the string "on" (YAML 1.2), not a boolean.
-  const { pull_request: rawPullRequest } = asRecord(ci.on) ?? {};
-  const pullRequest = asRecord(rawPullRequest);
-  const { types } = pullRequest ?? {};
-  if (!pullRequest) {
+  if (!triggers(ci).has('pull_request')) {
     messages.push('must run on pull_request');
-  } else if (!Array.isArray(types) || !types.includes('edited')) {
-    messages.push('pull_request types must include "edited" so a fixed PR title is checked again');
   }
 
   const jobs = asRecord(ci.jobs) ?? {};
@@ -148,6 +141,35 @@ function checkCi(ci, choices) {
     messages.push('job "dependency-review" must use actions/dependency-review-action');
   }
   return messages;
+}
+
+/**
+ * The events a workflow runs on, with each event's settings (`null` when it has none).
+ * @param {Workflow} doc
+ * @returns {Map<string, Record<string, unknown> | null>}
+ */
+function triggers(doc) {
+  // `yaml` parses the bare key `on` as the string "on" (YAML 1.2), not a boolean.
+  const { on } = doc;
+  if (typeof on === 'string' || Array.isArray(on)) {
+    return new Map(toStrings(on).map((event) => [event, null]));
+  }
+  return new Map(
+    Object.entries(asRecord(on) ?? {}).map(([event, settings]) => [event, asRecord(settings)]),
+  );
+}
+
+/**
+ * True when the workflow runs on a published release (no `types` means every type).
+ * @param {Workflow} doc
+ */
+function runsOnPublishedRelease(doc) {
+  const events = triggers(doc);
+  if (!events.has('release')) {
+    return false;
+  }
+  const { types } = events.get('release') ?? {};
+  return types === undefined || (Array.isArray(types) && types.includes('published'));
 }
 
 /**

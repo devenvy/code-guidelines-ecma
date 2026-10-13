@@ -1,5 +1,8 @@
 # Changelog
 
+Releases after 2.0.0 are described in
+[GitHub Releases](https://github.com/devenvy/code-guidelines-ecma/releases).
+
 ## [2.0.0](https://github.com/devenvy/code-guidelines-ecma/compare/v1.0.0...v2.0.0) (2026-10-12)
 
 

@@ -40,21 +40,6 @@ Prettier and TypeScript resolve the package name exactly as consumers do (pnpm o
   JavaScript consumer installs no TypeScript, Angular or Vitest packages, and a Node consumer no
   Angular packages.
 
-## Pull request titles
-
-PRs are squash-merged with the PR title as the commit message, and release-please reads those, so
-titles are [conventional commits](https://www.conventionalcommits.org/) (checked in CI):
-
-| Title                                                                | Release                              |
-| -------------------------------------------------------------------- | ------------------------------------ |
-| `fix: …`, `fix(deps): …`                                             | patch                                |
-| `feat: …`                                                            | minor                                |
-| `feat!: …` or a `BREAKING CHANGE:` footer in the PR description      | major                                |
-| `chore:`, `ci:`, `docs:`, `test:`, `refactor:`, `chore(deps-dev): …` | none (shipped with the next release) |
-
-A new `error` rule that fails a fixture or a first consumer is breaking (`feat!:`); other new rules
-and options are `feat:`; false-positive fixes are `fix:`.
-
 ## Upgrading plugins
 
 Dependabot opens one weekly npm PR including majors, and devenvy-bot enables auto-merge on it. When a
@@ -66,34 +51,27 @@ because the tables must match the installed plugin exactly.
 
 ## Releasing
 
-Releases are automatic. Every push to `main` runs release-please, which keeps a "chore: release
-x.y.z" PR up to date (version in `package.json`, `CHANGELOG.md`) and enables auto-merge on it. When
-its CI passes it merges, and that `release.yml` run re-runs CI on the release commit and publishes
-to npm with trusted publishing (OIDC, provenance, no token).
-
-To release something now, merge the pending release PR yourself (or run the Release workflow from
-the Actions tab). Prereleases: put `Release-As: 1.3.0-rc.1` in a PR description; they publish under
-the npm `next` dist-tag.
-
-devenvy-bot (a GitHub App) does the release-please and auto-merge work so its pull requests, merges
-and tags trigger CI and other workflows. It needs the org variable `DEVENVY_BOT_CLIENT_ID` and the
-org secret `DEVENVY_BOT_PRIVATE_KEY`, both also as org Dependabot secrets.
-
-### First release (one time)
-
-npm can only attach a trusted publisher to an existing package, so `1.0.0` is published by hand from
-`main` (`package.json` is already at 1.0.0):
+Releases are cut by hand, whenever there is something worth shipping. Publish a GitHub release
+whose tag is the new version, on `main`:
 
 ```sh
-pnpm install --frozen-lockfile
-npm login                      # account with 2FA, member of the devenvy npm org
-npm publish --access public
+gh release create v2.1.0 --target main --generate-notes
 ```
 
-Then on npmjs.com → `@devenvy/code-guidelines` → Settings → Trusted publishing: GitHub Actions,
-repository `devenvy/code-guidelines-ecma`, workflow `release.yml`. Finally create the release
-release-please builds on:
+(or Releases → Draft a new release → new tag → Generate release notes → Publish). `release.yml`
+checks that the tag is a version on `main`, runs CI on it, sets `package.json`'s version from the
+tag (it stays `0.0.0` in the repository), publishes to npm with trusted publishing (OIDC,
+provenance, no token), and attaches the tarball and an SPDX SBOM to the release. A prerelease tag
+(`v2.1.0-rc.1`, marked as a pre-release) publishes under the npm `next` dist-tag.
 
-```sh
-gh release create v1.0.0 --title v1.0.0 --notes "Initial release."
-```
+Choosing the version: a new `error` rule that fails a fixture or a consumer, a removed option, or a
+stricter `code-guidelines check` is a major; new rules, options and bases are a minor; fixes and
+dependency updates are a patch.
+
+If publishing fails because of the workflow itself, fix it on `main`, then run the Release
+workflow by hand (Actions tab) with the release's tag.
+
+devenvy-bot (a GitHub App) enables auto-merge on Dependabot PRs, so their merges trigger workflows.
+It needs the org variable `DEVENVY_BOT_CLIENT_ID` and the org secret `DEVENVY_BOT_PRIVATE_KEY`, both
+also as org Dependabot secrets. The npm trusted publisher (npmjs.com → `@devenvy/code-guidelines` →
+Settings) is bound to this repository and `release.yml`.

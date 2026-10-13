@@ -1,24 +1,23 @@
 name: Release
 
-# Every push to main updates the release PR (release-please) and enables auto-merge on it, so a
-# merged feat:/fix: PR is released once the release PR's CI passes. When the release PR merges,
-# this run re-runs CI on the release commit, publishes to npm with trusted publishing, attests
-# the tarball's build provenance and attaches the tarball and an SPDX SBOM to the release.
-# release-please runs as the devenvy-bot app (org variable DEVENVY_BOT_CLIENT_ID, org secret
-# DEVENVY_BOT_PRIVATE_KEY) so its pull requests get CI; GITHUB_TOKEN ones would not.
+# Publishing a GitHub release (tag vX.Y.Z on a commit on main) publishes that version: CI runs on
+# the tag, then the package is packed with the tag's version, published to npm with trusted
+# publishing, its tarball's build provenance is attested, and the tarball and an SPDX SBOM are
+# attached to the release. A prerelease tag (v1.2.0-rc.1) publishes under the npm `next` dist-tag.
 #
-# If publishing a release fails, run this workflow by hand from main with that release's tag: it
-# runs CI (on main) and publishes the tag's commit again (a version already on npm is skipped).
+# If publishing fails because of this workflow, fix it on main, then run this workflow by hand from
+# main with the release's tag: it runs CI (on main) and publishes the tag's code again (a version
+# already on npm is skipped).
 #
 # The npm trusted publisher is bound to this file name (release.yml).
 on:
-  push:
-    branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing release tag to publish again (e.g. v2.0.0); empty for a normal run
-        required: false
+        description: Existing release tag to publish again (e.g. v2.1.0)
+        required: true
         type: string
 
 permissions:
@@ -29,82 +28,52 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release-please:
+  # The tag must be a version on main; package.json's version is set from it.
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions: {}
+    timeout-minutes: 5
     outputs:
-      created: ${{ steps.target.outputs.created }}
-      tag: ${{ steps.target.outputs.tag }}
-      version: ${{ steps.target.outputs.version }}
+      tag: ${{ steps.tag.outputs.tag }}
+      version: ${{ steps.tag.outputs.version }}
     steps:
-      - id: app-token
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
-        with:
-          client-id: ${{ vars.DEVENVY_BOT_CLIENT_ID }}
-          private-key: ${{ secrets.DEVENVY_BOT_PRIVATE_KEY }}
-          # release PRs, tags, releases and their labels
-          permission-contents: write
-          permission-pull-requests: write
-          permission-issues: write
-      - id: release
-        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
-        with:
-          token: ${{ steps.app-token.outputs.token }}
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-      - name: Merge the pending release PR once its CI passes
-        if: steps.release.outputs.release_created != 'true'
+      - id: tag
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          # the PR release-please just created or updated; the label search can lag behind a new PR
-          RELEASE_PR: ${{ steps.release.outputs.pr }}
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
         run: |
-          pr=$(jq -r '.number // empty' <<< "${RELEASE_PR:-null}")
-          if [ -z "$pr" ]; then
-            pr=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --label 'autorelease: pending' --json number --jq '.[0].number // empty')
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::\"$TAG\" is not a release tag like v2.1.0"
+            exit 1
           fi
-          if [ -n "$pr" ]; then gh pr merge "$pr" --repo "$GITHUB_REPOSITORY" --auto --squash; fi
-      - name: Release to publish (the one just created, or an existing tag given by hand)
-        id: target
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          CREATED: ${{ steps.release.outputs.release_created }}
-          TAG: ${{ steps.release.outputs.tag_name }}
-          VERSION: ${{ steps.release.outputs.version }}
-          INPUT_TAG: ${{ inputs.tag }}
-        run: |
-          if [ -n "$INPUT_TAG" ]; then
-            if [[ ! "$INPUT_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-              echo "::error::\"$INPUT_TAG\" is not a release tag like v2.0.0"
-              exit 1
-            fi
-            gh release view "$INPUT_TAG" --repo "$GITHUB_REPOSITORY" > /dev/null
-            CREATED=true TAG="$INPUT_TAG" VERSION="${INPUT_TAG#v}"
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$TAG" --jq .status)
+          if [ "$status" != identical ] && [ "$status" != behind ]; then
+            echo "::error::$TAG is not on main"
+            exit 1
           fi
-          { echo "created=$CREATED"; echo "tag=$TAG"; echo "version=$VERSION"; } >> "$GITHUB_OUTPUT"
+          { echo "tag=$TAG"; echo "version=${TAG#v}"; } >> "$GITHUB_OUTPUT"
 
   ci:
-    needs: release-please
-    if: needs.release-please.outputs.created == 'true'
+    needs: verify
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
       pull-requests: write # ci.yml's test job declares it (used only for PR coverage comments)
 
   publish:
-    needs: [release-please, ci]
-    if: needs.release-please.outputs.created == 'true'
+    needs: [verify, ci]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
       contents: read
       id-token: write # npm trusted publishing (OIDC), npm provenance and the build attestation
       attestations: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ needs.release-please.outputs.tag }}
+          ref: ${{ needs.verify.outputs.tag }}
           persist-credentials: false
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -119,6 +88,8 @@ jobs:
           oldest=$(printf '%s\n' 11.5.1 "$version" | sort -V | head -n 1)
           if [ "$oldest" != 11.5.1 ]; then echo "npm $version is older than 11.5.1"; exit 1; fi
       - run: pnpm install --frozen-lockfile
+      - name: Set the version from the tag
+        run: npm pkg set "version=$VERSION"
       - name: Pack and write the SBOM
         id: pack
         run: |
@@ -132,7 +103,6 @@ jobs:
           subject-path: ${{ steps.pack.outputs.tarball }}
       - name: Publish (skipped when the version already exists)
         env:
-          VERSION: ${{ needs.release-please.outputs.version }}
           TARBALL: ${{ steps.pack.outputs.tarball }}
         # Unauthenticated registry read: setup-node's placeholder NODE_AUTH_TOKEN can make `npm view` fail.
         run: |
@@ -152,7 +122,7 @@ jobs:
   # Attaches the published tarball and its SBOM to the GitHub release. Separate from publish so
   # the job that can write to the repository never holds id-token: write.
   release-assets:
-    needs: [release-please, publish]
+    needs: [verify, publish]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -165,5 +135,5 @@ jobs:
       - name: Upload to the release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.release-please.outputs.tag }}
+          TAG: ${{ needs.verify.outputs.tag }}
         run: gh release upload "$TAG" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
