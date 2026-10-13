@@ -4,7 +4,7 @@ Requires Node 24 (see `.nvmrc`) and pnpm (version pinned in `packageManager`).
 
 ```sh
 pnpm install
-pnpm run typecheck   # generates types/ then checks src, scripts and test/types
+pnpm run typecheck   # generates types/ then checks src and test/types
 pnpm run lint
 pnpm run format:check
 pnpm run knip            # unused files, exports and dependencies
@@ -26,15 +26,15 @@ Prettier and TypeScript resolve the package name exactly as consumers do (pnpm o
 | `src/cli/`                | `init` / `check` / `sync`                                                                                                               |
 | `templates/`              | Managed-block contents                                                                                                                  |
 | `tsconfig/`               | Published tsconfig bases                                                                                                                |
-| `test/fixtures/`          | Plain JS, Node/TS and Angular projects linted by the tests; `workflows/` is the smallest repo layout `check` accepts                    |
-| `scripts/repo-settings/`  | GitHub settings baseline (not published)                                                                                                |
+| `test/fixtures/`          | Plain JS, Node/TS and Angular projects linted by the tests                                                                              |
 
 ## Tests
 
 - **rule-inventory** — every rule each plugin ships is decided; no deprecated rules; nothing the
   tables enable is turned off by `eslint-config-prettier` (except the re-enabled `curly`).
 - **lint** — runs ESLint on the fixtures and asserts the exact rules reported per file.
-- **cli / cli-lib** — init, check (including the CI convention) and sync against temp projects.
+- **cli / cli-lib** — init, check (including weakened ESLint and tsconfig settings) and sync
+  against temp projects.
 - **pack** — packs the tarball, installs it with npm into fresh consumer projects and runs the full
   consumer workflow, including `ngc` failing on a template type error. Also asserts that a plain
   JavaScript consumer installs no TypeScript, Angular or Vitest packages, and a Node consumer no

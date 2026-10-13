@@ -1,4 +1,0 @@
-jobs:
-  analysis:
-    steps:
-      - uses: ossf/scorecard-action@v2

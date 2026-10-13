@@ -64,7 +64,6 @@ afterAll(() => {
 function consumer(spec) {
   const dir = mkdtempSync(path.join(tmpdir(), `cg-consumer-${spec.fixture}-`));
   dirs.push(dir);
-  cpSync(path.join(fixtures, 'workflows'), dir, { recursive: true });
   for (const file of spec.files) {
     cpSync(path.join(fixtures, spec.fixture, file), path.join(dir, file), { recursive: true });
   }

@@ -8,7 +8,7 @@ export default defineConfig({
     coverage: {
       enabled: true,
       provider: 'v8',
-      include: ['src/**', 'scripts/**/*.mjs'],
+      include: ['src/**'],
       // bin.mjs is a 3-line entry point exercised for real by the pack test (a subprocess)
       exclude: ['src/cli/bin.mjs'],
       reporter: ['text-summary', 'json-summary', 'json', 'html'],
