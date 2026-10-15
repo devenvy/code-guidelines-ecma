@@ -213,6 +213,12 @@ that does nothing.
     required status check.
 - **`scorecard.yml`**: [OpenSSF Scorecard](https://scorecard.dev) on pushes to `main` and weekly.
   Its own workflow because publishing results restricts what else the workflow may contain.
+- **`codeql.yml`**: CodeQL on the code and the workflows (`actions`, `javascript-typescript`) with the
+  `security-and-quality` queries, on pull requests, `main` and weekly. A workflow rather than GitHub's
+  default setup, so the queries and languages are in the repository; the `main` ruleset requires its
+  results. (Turn the default setup off: GitHub rejects a workflow's results while it is on.)
+- **`SECURITY.md`**: supported versions and a link to private vulnerability reporting (enabled in the
+  repository settings).
 - **`.github/dependabot.yml`** with a 7-day cooldown.
 - Bot actions (Dependabot auto-merge) run as the devenvy-bot GitHub App — org variable
   `DEVENVY_BOT_CLIENT_ID`, org secret `DEVENVY_BOT_PRIVATE_KEY`, both also as Dependabot secrets —
