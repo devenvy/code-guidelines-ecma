@@ -1,7 +1,7 @@
 /*
  * @vitest/eslint-plugin rules. Every non-deprecated plugin rule is listed; effective configuration.
  */
-export default /** @type {import('eslint').Linter.RulesRecord} */ ({
+const rules = /** @type {import('eslint').Linter.RulesRecord} */ ({
   // -- Assertions --
   // helpers named expect* (e.g. expectValid(...)) count as assertions
   'vitest/expect-expect': ['error', { assertFunctionNames: ['expect', 'expect*'] }],
@@ -121,3 +121,5 @@ export default /** @type {import('eslint').Linter.RulesRecord} */ ({
   'vitest/padding-around-expect-groups': 'off',
   'vitest/padding-around-test-blocks': 'off',
 });
+
+export default rules;

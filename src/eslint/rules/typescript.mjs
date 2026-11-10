@@ -3,7 +3,7 @@
  * Every rule in typescript-eslint's `all` config is listed; this table is the effective
  * configuration for TS files.
  */
-export default /** @type {import('eslint').Linter.RulesRecord} */ ({
+const rules = /** @type {import('eslint').Linter.RulesRecord} */ ({
   '@typescript-eslint/adjacent-overload-signatures': 'error',
   '@typescript-eslint/array-type': 'error',
   '@typescript-eslint/await-thenable': 'error',
@@ -231,3 +231,5 @@ export default /** @type {import('eslint').Linter.RulesRecord} */ ({
   '@typescript-eslint/no-unnecessary-type-conversion': 'error',
   '@typescript-eslint/no-generated-empty-object-type': 'error',
 });
+
+export default rules;

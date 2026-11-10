@@ -40,6 +40,13 @@ describe('plain-js fixture', () => {
   it('clean file reports nothing', () => expect(report['clean.js']).toEqual([]));
   it('reports undefined identifiers in JS', () => expect(report['undef.js']).toEqual(['no-undef']));
   it('orders imports', () => expect(report['order.js']).toEqual(['import-x/order']));
+  // parent and sibling imports share a group: parents first (import-x 4.18's transitive comparator; the old one
+  // depended on the Node version's sort)
+  it('orders parent imports before sibling ones', () => {
+    expect(report['nested/parent-first.js']).toEqual([]);
+    expect(report['nested/sibling-first.js']).toEqual(['import-x/order']);
+    expect(report['nested/leaf.js']).toEqual([]);
+  });
 });
 
 describe('node-ts fixture', () => {

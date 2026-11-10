@@ -7,8 +7,6 @@ import { typescript } from './layers/typescript.mjs';
 import { vitest } from './layers/vitest.mjs';
 import { normalizeOptions, OPTIONS_SETTING } from './options.mjs';
 
-export { angular, ignores, imports, javascript, normalizeOptions, prettier, typescript, vitest };
-
 /** @typedef {import('./options.mjs').Options} Options */
 /** @typedef {import('eslint').Linter.Config} Config */
 
