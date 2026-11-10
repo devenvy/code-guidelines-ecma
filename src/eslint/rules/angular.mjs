@@ -1,7 +1,7 @@
 /*
  * @angular-eslint rules for TypeScript. Every plugin rule is listed; effective configuration.
  */
-export default /** @type {import('eslint').Linter.RulesRecord} */ ({
+const rules = /** @type {import('eslint').Linter.RulesRecord} */ ({
   // prefix comes from createConfig({ angular: { prefix } }); the angular layer sets the options
   '@angular-eslint/directive-selector': 'error',
   '@angular-eslint/component-selector': 'error',
@@ -62,3 +62,5 @@ export default /** @type {import('eslint').Linter.RulesRecord} */ ({
   // previously crashed on Signal Forms destructuring; verified fixed by test/lint.test.mjs
   '@angular-eslint/reactive-context-must-read-signal': 'error',
 });
+
+export default rules;

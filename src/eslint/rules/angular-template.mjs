@@ -1,7 +1,7 @@
 /*
  * @angular-eslint/template rules. Every plugin rule is listed; effective configuration.
  */
-export default /** @type {import('eslint').Linter.RulesRecord} */ ({
+const rules = /** @type {import('eslint').Linter.RulesRecord} */ ({
   '@angular-eslint/template/alt-text': 'error',
   '@angular-eslint/template/attributes-order': 'error',
   '@angular-eslint/template/banana-in-box': 'error',
@@ -56,3 +56,5 @@ export default /** @type {import('eslint').Linter.RulesRecord} */ ({
   '@angular-eslint/template/require-switch-default': 'error',
   '@angular-eslint/template/prefer-style-binding': 'error',
 });
+
+export default rules;

@@ -12,7 +12,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
-import * as prettier from 'prettier';
+import { format, resolveConfig } from 'prettier';
 
 import { gaps, inventories } from './rule-inventory.mjs';
 
@@ -70,8 +70,8 @@ async function main() {
       remove,
       add: undecided.map((rule) => [rule, inventory.initial(rule)]),
     });
-    const options = await prettier.resolveConfig(file);
-    writeFileSync(file, await prettier.format(updated, { ...options, filepath: file }));
+    const options = await resolveConfig(file);
+    writeFileSync(file, await format(updated, { ...options, filepath: file }));
     changed += undecided.length + remove.length;
     for (const rule of undecided) {
       console.log(`${inventory.file}: added ${rule}: ${JSON.stringify(inventory.initial(rule))}`);

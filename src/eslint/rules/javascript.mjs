@@ -2,7 +2,7 @@
  * Core ESLint rules. Every non-deprecated core rule is listed; this table is the effective
  * configuration (see docs/specs). Formatting is owned by Prettier.
  */
-export default /** @type {import('eslint').Linter.RulesRecord} */ ({
+const rules = /** @type {import('eslint').Linter.RulesRecord} */ ({
   // possible logic errors
   'array-callback-return': 'error',
   'constructor-super': 'error',
@@ -242,3 +242,5 @@ export default /** @type {import('eslint').Linter.RulesRecord} */ ({
   yoda: 'error',
   'unicode-bom': 'error',
 });
+
+export default rules;

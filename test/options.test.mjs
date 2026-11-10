@@ -1,12 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  angular,
-  createConfig,
-  normalizeOptions,
-  typescript,
-  vitest,
-} from '../src/eslint/index.mjs';
+import { createConfig } from '../src/eslint/index.mjs';
+import { angular } from '../src/eslint/layers/angular.mjs';
+import { typescript } from '../src/eslint/layers/typescript.mjs';
+import { vitest } from '../src/eslint/layers/vitest.mjs';
+import { normalizeOptions } from '../src/eslint/options.mjs';
 import { importPeer } from '../src/eslint/peer.mjs';
 
 /** A dynamic import that fails as if `specifier` were not installed. */

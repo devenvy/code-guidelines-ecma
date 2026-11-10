@@ -4,7 +4,7 @@
  * Resolution-based rules are off except no-cycle: TypeScript already reports unresolved modules
  * and missing named exports. The imports layer configures the TypeScript resolver for no-cycle.
  */
-export default /** @type {import('eslint').Linter.RulesRecord} */ ({
+const rules = /** @type {import('eslint').Linter.RulesRecord} */ ({
   // -- ordering and layout --
   // groups and internal patterns are set by the imports layer
   'import-x/order': 'error',
@@ -68,4 +68,14 @@ export default /** @type {import('eslint').Linter.RulesRecord} */ ({
   'import-x/no-dynamic-require': 'error',
   // Node built-ins are expected in Node projects; browser builds fail without polyfills anyway
   'import-x/no-nodejs-modules': 'off',
+  // -- barrel files: a module that mostly re-exports others makes every importer load all of them --
+  'import-x/avoid-barrel-files': 'error',
+  // also through dependencies: import the module itself (lodash-es/debounce), not the package's barrel
+  'import-x/avoid-importing-barrel-files': 'error',
+  // `import * as x` hides which exports are used and defeats tree-shaking; import them by name
+  'import-x/avoid-namespace-import': 'error',
+  // `export * from` makes the API whatever the other module exports; name the exports
+  'import-x/avoid-re-export-all': 'error',
 });
+
+export default rules;
