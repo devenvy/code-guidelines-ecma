@@ -55,6 +55,8 @@ const rules = /** @type {import('eslint').Linter.RulesRecord} */ ({
   '@angular-eslint/template/prefer-template-literal': 'error',
   '@angular-eslint/template/require-switch-default': 'error',
   '@angular-eslint/template/prefer-style-binding': 'error',
+  // added on a plugin update
+  '@angular-eslint/template/prefer-let-for-async-pipe': 'error',
 });
 
 export default rules;
