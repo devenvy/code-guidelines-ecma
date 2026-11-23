@@ -64,7 +64,12 @@ exports[`effective config > Angular TS 1`] = `
   "@angular-eslint/no-developer-preview": 2,
   "@angular-eslint/no-duplicates-in-metadata-arrays": 2,
   "@angular-eslint/no-empty-lifecycle-method": 2,
-  "@angular-eslint/no-experimental": 0,
+  "@angular-eslint/no-experimental": [
+    0,
+    {
+      "ignorePackages": [],
+    },
+  ],
   "@angular-eslint/no-forward-ref": 2,
   "@angular-eslint/no-implicit-take-until-destroyed": 2,
   "@angular-eslint/no-input-prefix": [
@@ -1878,13 +1883,19 @@ exports[`effective config > Angular template 1`] = `
     },
   ],
   "@angular-eslint/template/prefer-control-flow": 2,
+  "@angular-eslint/template/prefer-let-for-async-pipe": 2,
   "@angular-eslint/template/prefer-ngsrc": 0,
   "@angular-eslint/template/prefer-self-closing-tags": 2,
   "@angular-eslint/template/prefer-static-string-properties": [
     2,
     {},
   ],
-  "@angular-eslint/template/prefer-style-binding": 2,
+  "@angular-eslint/template/prefer-style-binding": [
+    2,
+    {
+      "bindUnits": false,
+    },
+  ],
   "@angular-eslint/template/prefer-template-literal": 2,
   "@angular-eslint/template/require-switch-default": 2,
   "@angular-eslint/template/role-has-required-aria": 2,
